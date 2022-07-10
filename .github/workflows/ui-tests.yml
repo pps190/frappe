@@ -4,7 +4,7 @@ on:
   pull_request:
   workflow_dispatch:
   push:
-    branches: [ develop ]
+    branches: [ pps ]
 
 concurrency:
   group: ui-develop-${{ github.event.number }}
@@ -142,7 +142,7 @@ jobs:
         if: ${{ steps.check-build.outputs.build == 'strawberry' }}
         run: cd ~/frappe-bench/ && bench --site test_site run-ui-tests frappe --with-coverage --headless --parallel --ci-build-id $GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
         env:
-          CYPRESS_RECORD_KEY: 4a48f41c-11b3-425b-aa88-c58048fa69eb
+          CYPRESS_RECORD_KEY: 3a1cde88-6fd2-44ec-ae34-f0dc54b3bd81
 
       - name: Stop server
         if: ${{ steps.check-build.outputs.build-server == 'strawberry' }}
