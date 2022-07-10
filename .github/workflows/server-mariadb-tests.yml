@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-       container: [1]
+       container: [1, 2]
 
     name: Python Unit Tests (MariaDB)
 
@@ -119,6 +119,7 @@ jobs:
 
       - name: Run Tests
         if: ${{ steps.check-build.outputs.build == 'strawberry' }}
-        run: cd ~/frappe-bench/ && bench --site test_site run-tests
+        run: cd ~/frappe-bench/ && bench --site test_site run-parallel-tests --use-orchestrator
         env:
           CI_BUILD_ID: ${{ github.run_id }}
+          ORCHESTRATOR_URL: http://test-orchestrator.frappe.io
