@@ -19,7 +19,7 @@ def fetch_pr_data(pr_number, repo, endpoint=""):
 	res = urllib.request.urlopen(req)
 	return json.loads(res.read().decode('utf8'))
 
-def get_files_list(pr_number, repo="frappe/frappe"):
+def get_files_list(pr_number, repo="pps190/frappe"):
 	return [change["filename"] for change in fetch_pr_data(pr_number, repo, "files")]
 
 def get_output(command, shell=True):
@@ -27,16 +27,16 @@ def get_output(command, shell=True):
 	command = shlex.split(command)
 	return subprocess.check_output(command, shell=shell, encoding="utf8").strip()
 
-def has_skip_ci_label(pr_number, repo="frappe/frappe"):
+def has_skip_ci_label(pr_number, repo="pps190/frappe"):
 	return has_label(pr_number, "Skip CI", repo)
 
-def has_run_server_tests_label(pr_number, repo="frappe/frappe"):
+def has_run_server_tests_label(pr_number, repo="pps190/frappe"):
 	return has_label(pr_number, "Run Server Tests", repo)
 
-def has_run_ui_tests_label(pr_number, repo="frappe/frappe"):
+def has_run_ui_tests_label(pr_number, repo="pps190/frappe"):
 	return has_label(pr_number, "Run UI Tests", repo)
 
-def has_label(pr_number, label, repo="frappe/frappe"):
+def has_label(pr_number, label, repo="pps190/frappe"):
 	return any([fetched_label["name"] for fetched_label in fetch_pr_data(pr_number, repo)["labels"] if fetched_label["name"] == label])
 
 def is_py(file):
