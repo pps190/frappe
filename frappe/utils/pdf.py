@@ -100,11 +100,11 @@ def prepare_options(html, options):
 		}
 	)
 
-	if not options.get("margin-right"):
-		options["margin-right"] = "15mm"
+	#if not options.get("margin-right"):
+	options["margin-right"] = "5mm"
 
-	if not options.get("margin-left"):
-		options["margin-left"] = "15mm"
+	#if not options.get("margin-left"):
+	options["margin-left"] = "5mm"
 
 	html, html_options = read_options_from_html(html)
 	options.update(html_options or {})
@@ -175,6 +175,7 @@ def read_options_from_html(html):
 		except Exception:
 			pass
 
+
 	return str(soup), options
 
 
@@ -217,10 +218,10 @@ def prepare_header_footer(soup):
 			# {"header-html": "/tmp/frappe-pdf-random.html"}
 			options[html_id] = fname
 		else:
-			if html_id == "header-html":
-				options["margin-top"] = "15mm"
-			elif html_id == "footer-html":
-				options["margin-bottom"] = "15mm"
+#			if html_id == "header-html":
+			options["margin-top"] = "0mm"
+#			elif html_id == "footer-html":
+			options["margin-bottom"] = "1mm"
 
 	return options
 

@@ -49,8 +49,7 @@ export default {
 		return {
 			src: null,
 			cropper: null,
-			image: null,
-			aspect_ratio
+			image: null
 		};
 	},
 	watch: {
