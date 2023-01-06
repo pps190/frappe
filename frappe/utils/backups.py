@@ -11,18 +11,20 @@ from shutil import which
 
 # imports - third party imports
 import click
+from cryptography.fernet import Fernet
 
 # imports - module imports
 import frappe
 from frappe import conf
 from frappe.utils import cint, get_file_size, get_url, now, now_datetime
-from frappe.utils.password import get_encryption_key
 
 # backup variable for backwards compatibility
 verbose = False
 compress = False
 _verbose = verbose
 base_tables = ["__Auth", "__global_search", "__UserSettings"]
+
+BACKUP_ENCRYPTION_CONFIG_KEY = "backup_encryption_key"
 
 
 class BackupGenerator:
@@ -230,7 +232,7 @@ class BackupGenerator:
 				cmd_string = "gpg --yes --passphrase {passphrase} --pinentry-mode loopback -c {filelocation}"
 				try:
 					command = cmd_string.format(
-						passphrase=get_encryption_key(),
+						passphrase=get_or_generate_backup_encryption_key(),
 						filelocation=path,
 					)
 
@@ -418,8 +420,9 @@ class BackupGenerator:
 				)
 
 			cmd_string = (
-				"{db_exc} postgres://{user}:{password}@{db_host}:{db_port}/{db_name}"
-				" {include} {exclude} | {gzip} >> {backup_path_db}"
+				"self=$$; "
+				"( {db_exc} postgres://{user}:{password}@{db_host}:{db_port}/{db_name}"
+				" {include} {exclude} || kill $self ) | {gzip} >> {backup_path_db}"
 			)
 
 		else:
@@ -431,8 +434,10 @@ class BackupGenerator:
 				)
 
 			cmd_string = (
-				"{db_exc} --single-transaction --quick --lock-tables=false -u {user}"
-				" -p{password} {db_name} -h {db_host} -P {db_port} {include} {exclude}"
+				# Remember process of this shell and kill it if mysqldump exits w/ non-zero code
+				"self=$$; "
+				" ( {db_exc} --single-transaction --quick --lock-tables=false -u {user}"
+				" -p{password} {db_name} -h {db_host} -P {db_port} {include} {exclude} || kill $self ) "
 				" | {gzip} >> {backup_path_db}"
 			)
 
@@ -452,7 +457,7 @@ class BackupGenerator:
 		if self.verbose:
 			print(command.replace(args.password, "*" * 10) + "\n")
 
-		frappe.utils.execute_in_shell(command, low_priority=True)
+		frappe.utils.execute_in_shell(command, low_priority=True, check_exit_code=True)
 
 	def send_email(self):
 		"""
@@ -628,7 +633,20 @@ def get_backup_path():
 @frappe.whitelist()
 def get_backup_encryption_key():
 	frappe.only_for("System Manager")
-	return frappe.conf.encryption_key
+	return frappe.conf.get(BACKUP_ENCRYPTION_CONFIG_KEY)
+
+
+def get_or_generate_backup_encryption_key():
+	from frappe.installer import update_site_config
+
+	key = frappe.conf.get(BACKUP_ENCRYPTION_CONFIG_KEY)
+	if key:
+		return key
+
+	key = Fernet.generate_key().decode()
+	update_site_config(BACKUP_ENCRYPTION_CONFIG_KEY, key)
+
+	return key
 
 
 class Backup:
@@ -692,76 +710,3 @@ def backup(
 		"backup_path_files": odb.backup_path_files,
 		"backup_path_private_files": odb.backup_path_private_files,
 	}
-
-
-if __name__ == "__main__":
-	import sys
-
-	from frappe.utils.commands import warn
-
-	warn(
-		"Calling the backup script directly is deprecated. "
-		"Use the backup command instead. This script will be removed in Frappe v15.",
-		category=DeprecationWarning,
-	)
-
-	cmd = sys.argv[1]
-
-	db_type = "mariadb"
-	try:
-		db_type = sys.argv[6]
-	except IndexError:
-		pass
-
-	db_port = 3306
-	try:
-		db_port = int(sys.argv[7])
-	except IndexError:
-		pass
-
-	if cmd == "is_file_old":
-		odb = BackupGenerator(
-			sys.argv[2],
-			sys.argv[3],
-			sys.argv[4],
-			sys.argv[5] or "localhost",
-			db_type=db_type,
-			db_port=db_port,
-		)
-		is_file_old(odb.db_file_name)
-
-	if cmd == "get_backup":
-		odb = BackupGenerator(
-			sys.argv[2],
-			sys.argv[3],
-			sys.argv[4],
-			sys.argv[5] or "localhost",
-			db_type=db_type,
-			db_port=db_port,
-		)
-		odb.get_backup()
-
-	if cmd == "take_dump":
-		odb = BackupGenerator(
-			sys.argv[2],
-			sys.argv[3],
-			sys.argv[4],
-			sys.argv[5] or "localhost",
-			db_type=db_type,
-			db_port=db_port,
-		)
-		odb.take_dump()
-
-	if cmd == "send_email":
-		odb = BackupGenerator(
-			sys.argv[2],
-			sys.argv[3],
-			sys.argv[4],
-			sys.argv[5] or "localhost",
-			db_type=db_type,
-			db_port=db_port,
-		)
-		odb.send_email()
-
-	if cmd == "delete_temp_backups":
-		delete_temp_backups()

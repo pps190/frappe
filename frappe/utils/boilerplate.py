@@ -79,7 +79,8 @@ def is_valid_title(title) -> bool:
 
 def _create_app_boilerplate(dest, hooks, no_git=False):
 	frappe.create_folder(
-		os.path.join(dest, hooks.app_name, hooks.app_name, frappe.scrub(hooks.app_title)), with_init=True
+		os.path.join(dest, hooks.app_name, hooks.app_name, frappe.scrub(hooks.app_title)),
+		with_init=True,
 	)
 	frappe.create_folder(
 		os.path.join(dest, hooks.app_name, hooks.app_name, "templates"), with_init=True
@@ -134,12 +135,6 @@ def _create_app_boilerplate(dest, hooks, no_git=False):
 		f.write(frappe.as_unicode(hooks_template.format(**hooks)))
 
 	touch_file(os.path.join(dest, hooks.app_name, hooks.app_name, "patches.txt"))
-
-	with open(os.path.join(dest, hooks.app_name, hooks.app_name, "config", "desktop.py"), "w") as f:
-		f.write(frappe.as_unicode(desktop_template.format(**hooks)))
-
-	with open(os.path.join(dest, hooks.app_name, hooks.app_name, "config", "docs.py"), "w") as f:
-		f.write(frappe.as_unicode(docs_template.format(**hooks)))
 
 	app_directory = os.path.join(dest, hooks.app_name)
 
@@ -249,8 +244,8 @@ app_license = "{app_license}"
 
 # add methods and filters to jinja environment
 # jinja = {{
-# 	"methods": "{app_name}.utils.jinja_methods",
-# 	"filters": "{app_name}.utils.jinja_filters"
+#	"methods": "{app_name}.utils.jinja_methods",
+#	"filters": "{app_name}.utils.jinja_filters"
 # }}
 
 # Installation
@@ -276,11 +271,11 @@ app_license = "{app_license}"
 # Permissions evaluated in scripted ways
 
 # permission_query_conditions = {{
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
+#	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
 # }}
 #
 # has_permission = {{
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
+#	"Event": "frappe.desk.doctype.event.event.has_permission",
 # }}
 
 # DocType Class
@@ -288,7 +283,7 @@ app_license = "{app_license}"
 # Override standard doctype classes
 
 # override_doctype_class = {{
-# 	"ToDo": "custom_app.overrides.CustomToDo"
+#	"ToDo": "custom_app.overrides.CustomToDo"
 # }}
 
 # Document Events
@@ -296,10 +291,10 @@ app_license = "{app_license}"
 # Hook on document methods and events
 
 # doc_events = {{
-# 	"*": {{
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
+#	"*": {{
+#		"on_update": "method",
+#		"on_cancel": "method",
+#		"on_trash": "method"
 #	}}
 # }}
 
@@ -307,21 +302,21 @@ app_license = "{app_license}"
 # ---------------
 
 # scheduler_events = {{
-# 	"all": [
-# 		"{app_name}.tasks.all"
-# 	],
-# 	"daily": [
-# 		"{app_name}.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"{app_name}.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"{app_name}.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"{app_name}.tasks.monthly"
-# 	],
+#	"all": [
+#		"{app_name}.tasks.all"
+#	],
+#	"daily": [
+#		"{app_name}.tasks.daily"
+#	],
+#	"hourly": [
+#		"{app_name}.tasks.hourly"
+#	],
+#	"weekly": [
+#		"{app_name}.tasks.weekly"
+#	],
+#	"monthly": [
+#		"{app_name}.tasks.monthly"
+#	],
 # }}
 
 # Testing
@@ -333,71 +328,56 @@ app_license = "{app_license}"
 # ------------------------------
 #
 # override_whitelisted_methods = {{
-# 	"frappe.desk.doctype.event.event.get_events": "{app_name}.event.get_events"
+#	"frappe.desk.doctype.event.event.get_events": "{app_name}.event.get_events"
 # }}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
 # along with any modifications made in other Frappe apps
 # override_doctype_dashboards = {{
-# 	"Task": "{app_name}.task.get_dashboard_data"
+#	"Task": "{app_name}.task.get_dashboard_data"
 # }}
 
 # exempt linked doctypes from being automatically cancelled
 #
 # auto_cancel_exempted_doctypes = ["Auto Repeat"]
 
+# Ignore links to specified DocTypes when deleting documents
+# -----------------------------------------------------------
+
+# ignore_links_on_delete = ["Communication", "ToDo"]
+
 
 # User Data Protection
 # --------------------
 
 # user_data_fields = [
-# 	{{
-# 		"doctype": "{{doctype_1}}",
-# 		"filter_by": "{{filter_by}}",
-# 		"redact_fields": ["{{field_1}}", "{{field_2}}"],
-# 		"partial": 1,
-# 	}},
-# 	{{
-# 		"doctype": "{{doctype_2}}",
-# 		"filter_by": "{{filter_by}}",
-# 		"partial": 1,
-# 	}},
-# 	{{
-# 		"doctype": "{{doctype_3}}",
-# 		"strict": False,
-# 	}},
-# 	{{
-# 		"doctype": "{{doctype_4}}"
-# 	}}
+#	{{
+#		"doctype": "{{doctype_1}}",
+#		"filter_by": "{{filter_by}}",
+#		"redact_fields": ["{{field_1}}", "{{field_2}}"],
+#		"partial": 1,
+#	}},
+#	{{
+#		"doctype": "{{doctype_2}}",
+#		"filter_by": "{{filter_by}}",
+#		"partial": 1,
+#	}},
+#	{{
+#		"doctype": "{{doctype_3}}",
+#		"strict": False,
+#	}},
+#	{{
+#		"doctype": "{{doctype_4}}"
+#	}}
 # ]
 
 # Authentication and authorization
 # --------------------------------
 
 # auth_hooks = [
-# 	"{app_name}.auth.validate"
+#	"{app_name}.auth.validate"
 # ]
-
-# Translation
-# --------------------------------
-
-# Make link fields search translated document names for these DocTypes
-# Recommended only for DocTypes which have limited documents with untranslated names
-# For example: Role, Gender, etc.
-# translated_search_doctypes = []
-"""
-
-desktop_template = """from frappe import _
-
-def get_data():
-	return [
-		{{
-			"module_name": "{app_title}",
-			"type": "module",
-			"label": _("{app_title}")
-		}}
-	]
 """
 
 setup_template = """from setuptools import setup, find_packages
@@ -426,21 +406,7 @@ gitignore_template = """.DS_Store
 *.egg-info
 *.swp
 tags
-{app_name}/docs/current
-node_modules/"""
-
-docs_template = '''"""
-Configuration for docs
-"""
-
-# source_link = "https://github.com/[org_name]/{app_name}"
-# headline = "App that does everything"
-# sub_heading = "Yes, you got that right the first time, everything"
-
-def get_context(context):
-	context.brand_html = "{app_title}"
-'''
-
+node_modules"""
 
 github_workflow_template = """
 name: CI
@@ -463,6 +429,18 @@ jobs:
     name: Server
 
     services:
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
+      redis-socketio:
+        image: redis:alpine
+        ports:
+          - 12000:6379
       mariadb:
         image: mariadb:10.6
         env:
@@ -473,17 +451,17 @@ jobs:
 
     steps:
       - name: Clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
       - name: Setup Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
         with:
-          node-version: 14
+          node-version: 16
           check-latest: true
 
       - name: Cache pip
@@ -497,9 +475,9 @@ jobs:
 
       - name: Get yarn cache directory path
         id: yarn-cache-dir-path
-        run: 'echo "::set-output name=dir::$(yarn cache dir)"'
+        run: 'echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT'
 
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         id: yarn-cache
         with:
           path: ${{{{ steps.yarn-cache-dir-path.outputs.dir }}}}

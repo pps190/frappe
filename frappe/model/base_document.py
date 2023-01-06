@@ -17,7 +17,7 @@ from frappe.model.docstatus import DocStatus
 from frappe.model.naming import set_new_name
 from frappe.model.utils.link_count import notify_link_count
 from frappe.modules import load_doctype_module
-from frappe.utils import cast_fieldtype, cint, cstr, flt, now, sanitize_html, strip_html
+from frappe.utils import cast_fieldtype, cint, compare, cstr, flt, now, sanitize_html, strip_html
 from frappe.utils.html_utils import unescape_html
 
 max_positive_value = {"smallint": 2**15 - 1, "int": 2**31 - 1, "bigint": 2**63 - 1}
@@ -89,8 +89,10 @@ class BaseDocument:
 		"meta",
 		"_meta",
 		"flags",
+		"parent_doc",
 		"_table_fields",
 		"_valid_columns",
+		"_doc_before_save",
 		"_table_fieldnames",
 		"_reserved_keywords",
 		"dont_update_if_missing",
@@ -100,12 +102,7 @@ class BaseDocument:
 		if d.get("doctype"):
 			self.doctype = d["doctype"]
 
-		self._table_fieldnames = (
-			d["_table_fieldnames"]  # from cache
-			if "_table_fieldnames" in d
-			else {df.fieldname for df in self._get_table_fields()}
-		)
-
+		self._table_fieldnames = {df.fieldname for df in self._get_table_fields()}
 		self.update(d)
 		self.dont_update_if_missing = []
 
@@ -152,8 +149,9 @@ class BaseDocument:
 		if "name" in d:
 			self.name = d["name"]
 
+		ignore_children = hasattr(self, "flags") and self.flags.ignore_children
 		for key, value in d.items():
-			self.set(key, value)
+			self.set(key, value, as_value=ignore_children)
 
 		return self
 
@@ -290,7 +288,7 @@ class BaseDocument:
 			return DOCTYPE_TABLE_FIELDS
 
 		# child tables don't have child tables
-		if self.doctype in DOCTYPES_FOR_DOCTYPE or getattr(self, "parentfield", None):
+		if self.doctype in DOCTYPES_FOR_DOCTYPE:
 			return ()
 
 		return self.meta.get_table_fields()
@@ -671,10 +669,23 @@ class BaseDocument:
 
 			return _("Error: Value missing for {0}: {1}").format(_(df.parent), _(df.label))
 
+		def has_content(df):
+			value = cstr(self.get(df.fieldname))
+			has_text_content = strip_html(value).strip()
+			has_img_tag = "<img" in value
+			has_text_or_img_tag = has_text_content or has_img_tag
+
+			if df.fieldtype == "Text Editor" and has_text_or_img_tag:
+				return True
+			elif df.fieldtype == "Code" and df.options == "HTML" and has_text_or_img_tag:
+				return True
+			else:
+				return has_text_content
+
 		missing = []
 
 		for df in self.meta.get("fields", {"reqd": ("=", 1)}):
-			if self.get(df.fieldname) in (None, []) or not strip_html(cstr(self.get(df.fieldname))).strip():
+			if self.get(df.fieldname) in (None, []) or not has_content(df):
 				missing.append((df.fieldname, get_msg(df)))
 
 		# check for missing parent and parenttype
@@ -735,7 +746,7 @@ class BaseDocument:
 						# don't cache if fetching other values too
 						values = frappe.db.get_value(doctype, docname, values_to_fetch, as_dict=True)
 
-				if frappe.get_meta(doctype).issingle:
+				if getattr(frappe.get_meta(doctype), "issingle", 0):
 					values.name = doctype
 
 				if frappe.get_meta(doctype).get("is_virtual"):
@@ -875,7 +886,7 @@ class BaseDocument:
 		if frappe.flags.in_install:
 			return
 
-		if self.meta.issingle:
+		if getattr(self.meta, "issingle", 0):
 			# single doctype value type is mediumtext
 			return
 
@@ -1165,7 +1176,10 @@ class BaseDocument:
 				# get values from old doc
 				if self.get("parent_doc"):
 					parent_doc = self.parent_doc.get_latest()
-					ref_doc = [d for d in parent_doc.get(self.parentfield) if d.name == self.name][0]
+					child_docs = [d for d in parent_doc.get(self.parentfield) if d.name == self.name]
+					if not child_docs:
+						return
+					ref_doc = child_docs[0]
 				else:
 					ref_doc = self.get_latest()
 
@@ -1219,7 +1233,7 @@ def _filter(data, filters, limit=None):
 
 	for d in data:
 		for f, fval in _filters.items():
-			if not frappe.compare(getattr(d, f, None), fval[0], fval[1]):
+			if not compare(getattr(d, f, None), fval[0], fval[1]):
 				break
 		else:
 			out.append(d)

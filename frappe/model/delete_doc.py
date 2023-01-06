@@ -16,24 +16,6 @@ from frappe.utils.file_manager import remove_all
 from frappe.utils.global_search import delete_for_document
 from frappe.utils.password import delete_all_passwords_for
 
-doctypes_to_skip = (
-	"Communication",
-	"ToDo",
-	"DocShare",
-	"Email Unsubscribe",
-	"Activity Log",
-	"File",
-	"Version",
-	"Document Follow",
-	"Comment",
-	"View Log",
-	"Tag Link",
-	"Notification Log",
-	"Email Queue",
-	"Document Share Key",
-	"Integration Request",
-)
-
 
 def delete_doc(
 	doctype=None,
@@ -92,9 +74,15 @@ def delete_doc(
 
 			else:
 				doc = frappe.get_doc(doctype, name)
+				if not (doc.custom or frappe.conf.developer_mode or frappe.flags.in_patch or force):
+					frappe.throw(_("Standard DocType can not be deleted."))
 
 				update_flags(doc, flags, ignore_permissions)
 				check_permission_and_not_submitted(doc)
+				# delete custom table fields using this doctype.
+				frappe.db.delete(
+					"Custom Field", {"options": name, "fieldtype": ("in", frappe.model.table_fields)}
+				)
 				frappe.db.delete("__global_search", {"doctype": name})
 
 			delete_from_table(doctype, name, ignore_doctypes, None)
@@ -166,9 +154,6 @@ def delete_doc(
 					insert_feed(doc)
 				except ImportError:
 					pass
-
-			# delete user_permissions
-			frappe.defaults.clear_default(parenttype="User Permission", key=doctype, value=name)
 
 
 def add_to_deleted_document(doc):
@@ -274,7 +259,7 @@ def check_if_doc_is_linked(doc, method="Delete"):
 				item_parent = getattr(item, "parent", None)
 				linked_doctype = item.parenttype if item_parent else link_dt
 
-				if linked_doctype in doctypes_to_skip or (
+				if linked_doctype in frappe.get_hooks("ignore_links_on_delete") or (
 					linked_doctype in ignore_linked_doctypes and method == "Cancel"
 				):
 					# don't check for communication and todo!
@@ -303,7 +288,9 @@ def check_if_doc_is_dynamically_linked(doc, method="Delete"):
 
 		ignore_linked_doctypes = doc.get("ignore_linked_doctypes") or []
 
-		if df.parent in doctypes_to_skip or (df.parent in ignore_linked_doctypes and method == "Cancel"):
+		if df.parent in frappe.get_hooks("ignore_links_on_delete") or (
+			df.parent in ignore_linked_doctypes and method == "Cancel"
+		):
 			# don't check for communication and todo!
 			continue
 
@@ -361,7 +348,7 @@ def raise_link_exists_exception(doc, reference_doctype, reference_docname, row="
 
 	frappe.throw(
 		_("Cannot delete or cancel because {0} {1} is linked with {2} {3} {4}").format(
-			doc.doctype, doc_link, reference_doctype, reference_link, row
+			_(doc.doctype), doc_link, _(reference_doctype), reference_link, row
 		),
 		frappe.LinkExistsError,
 	)

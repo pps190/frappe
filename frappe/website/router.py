@@ -5,7 +5,8 @@ import io
 import os
 import re
 
-from werkzeug.routing import Map, NotFound, Rule
+from werkzeug.exceptions import NotFound
+from werkzeug.routing import Map, Rule
 
 import frappe
 from frappe.website.utils import extract_title, get_frontmatter
@@ -33,7 +34,7 @@ def get_page_info_from_web_page_with_dynamic_routes(path):
 def get_page_info_from_web_form(path):
 	"""Query published web forms and evaluate if the route matches"""
 	rules, page_info = [], {}
-	web_forms = frappe.db.get_all("Web Form", ["name", "route", "modified"], {"published": 1})
+	web_forms = frappe.get_all("Web Form", ["name", "route", "modified"], {"published": 1})
 	for d in web_forms:
 		rules.append(Rule(f"/{d.route}", endpoint=d.name))
 		rules.append(Rule(f"/{d.route}/list", endpoint=d.name))
@@ -108,7 +109,7 @@ def get_pages_from_path(start, app, app_path):
 	if os.path.exists(start_path):
 		for basepath, folders, files in os.walk(start_path):
 			# add missing __init__.py
-			if not "__init__.py" in files:
+			if not "__init__.py" in files and frappe.conf.get("developer_mode"):
 				open(os.path.join(basepath, "__init__.py"), "a").close()
 
 			for fname in files:

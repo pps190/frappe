@@ -2,7 +2,7 @@ import json
 import os
 import subprocess
 import sys
-from distutils.spawn import find_executable
+from shutil import which
 
 import click
 
@@ -12,6 +12,7 @@ from frappe.coverage import CodeCoverage
 from frappe.exceptions import SiteNotSpecifiedError
 from frappe.utils import cint, update_progress_bar
 
+find_executable = which  # backwards compatibility
 DATA_IMPORT_DEPRECATION = (
 	"[DEPRECATED] The `import-csv` command used 'Data Import Legacy' which has been deprecated.\n"
 	"Use `data-import` command instead to import data via 'Data Import'."
@@ -53,33 +54,35 @@ def build(
 ):
 	"Compile JS and CSS source files"
 	from frappe.build import bundle, download_frappe_assets
+	from frappe.utils.synchronization import filelock
 
 	frappe.init("")
 
 	if not apps and app:
 		apps = app
 
-	# dont try downloading assets if force used, app specified or running via CI
-	if not (force or apps or os.environ.get("CI")):
-		# skip building frappe if assets exist remotely
-		skip_frappe = download_frappe_assets(verbose=verbose)
-	else:
-		skip_frappe = False
+	with filelock("bench_build", is_global=True, timeout=10):
+		# dont try downloading assets if force used, app specified or running via CI
+		if not (force or apps or os.environ.get("CI")):
+			# skip building frappe if assets exist remotely
+			skip_frappe = download_frappe_assets(verbose=verbose)
+		else:
+			skip_frappe = False
 
-	# don't minify in developer_mode for faster builds
-	development = frappe.local.conf.developer_mode or frappe.local.dev_server
-	mode = "development" if development else "production"
-	if production:
-		mode = "production"
+		# don't minify in developer_mode for faster builds
+		development = frappe.local.conf.developer_mode or frappe.local.dev_server
+		mode = "development" if development else "production"
+		if production:
+			mode = "production"
 
-	if make_copy or restore:
-		hard_link = make_copy or restore
-		click.secho(
-			"bench build: --make-copy and --restore options are deprecated in favour of --hard-link",
-			fg="yellow",
-		)
+		if make_copy or restore:
+			hard_link = make_copy or restore
+			click.secho(
+				"bench build: --make-copy and --restore options are deprecated in favour of --hard-link",
+				fg="yellow",
+			)
 
-	bundle(mode, apps=apps, hard_link=hard_link, verbose=verbose, skip_frappe=skip_frappe)
+		bundle(mode, apps=apps, hard_link=hard_link, verbose=verbose, skip_frappe=skip_frappe)
 
 
 @click.command("watch")
@@ -525,11 +528,11 @@ def postgres(context):
 def _mariadb():
 	from frappe.database.mariadb.database import MariaDBDatabase
 
-	mysql = find_executable("mysql")
+	mysql = which("mysql")
 	command = [
 		mysql,
 		"--port",
-		frappe.conf.db_port or MariaDBDatabase.default_port,
+		str(frappe.conf.db_port or MariaDBDatabase.default_port),
 		"-u",
 		frappe.conf.db_name,
 		f"-p{frappe.conf.db_password}",
@@ -544,13 +547,20 @@ def _mariadb():
 
 
 def _psql():
-	psql = find_executable("psql")
-	subprocess.run([psql, "-d", frappe.conf.db_name])
+	psql = which("psql")
+
+	host = frappe.conf.db_host or "127.0.0.1"
+	port = frappe.conf.db_port or "5432"
+	env = os.environ.copy()
+	env["PGPASSWORD"] = frappe.conf.db_password
+	conn_string = f"postgresql://{frappe.conf.db_name}@{host}:{port}/{frappe.conf.db_name}"
+	subprocess.run([psql, conn_string], check=True, env=env)
 
 
 @click.command("jupyter")
 @pass_context
 def jupyter(context):
+	"""Start an interactive jupyter notebook"""
 	installed_packages = (
 		r.split("==")[0]
 		for r in subprocess.check_output([sys.executable, "-m", "pip", "freeze"], encoding="utf8")
@@ -769,6 +779,7 @@ def run_tests(
 	failfast=False,
 	case=None,
 ):
+	"""Run python unit-tests"""
 
 	with CodeCoverage(coverage, app):
 		import frappe
@@ -819,10 +830,19 @@ def run_tests(
 @click.option("--total-builds", help="Total number of builds", default=1)
 @click.option("--with-coverage", is_flag=True, help="Build coverage file")
 @click.option("--use-orchestrator", is_flag=True, help="Use orchestrator to run parallel tests")
+@click.option("--dry-run", is_flag=True, default=False, help="Dont actually run tests")
 @pass_context
 def run_parallel_tests(
-	context, app, build_number, total_builds, with_coverage=False, use_orchestrator=False
+	context,
+	app,
+	build_number,
+	total_builds,
+	with_coverage=False,
+	use_orchestrator=False,
+	dry_run=False,
 ):
+	from traceback_with_variables import activate_by_import
+
 	with CodeCoverage(with_coverage, app):
 		site = get_site(context)
 		if use_orchestrator:
@@ -832,18 +852,36 @@ def run_parallel_tests(
 		else:
 			from frappe.parallel_test_runner import ParallelTestRunner
 
-			ParallelTestRunner(app, site=site, build_number=build_number, total_builds=total_builds)
+			ParallelTestRunner(
+				app,
+				site=site,
+				build_number=build_number,
+				total_builds=total_builds,
+				dry_run=dry_run,
+			)
 
 
-@click.command("run-ui-tests")
+@click.command(
+	"run-ui-tests",
+	context_settings=dict(
+		ignore_unknown_options=True,
+	),
+)
 @click.argument("app")
+@click.argument("cypressargs", nargs=-1, type=click.UNPROCESSED)
 @click.option("--headless", is_flag=True, help="Run UI Test in headless mode")
 @click.option("--parallel", is_flag=True, help="Run UI Test in parallel mode")
 @click.option("--with-coverage", is_flag=True, help="Generate coverage report")
 @click.option("--ci-build-id")
 @pass_context
 def run_ui_tests(
-	context, app, headless=False, parallel=True, with_coverage=False, ci_build_id=None
+	context,
+	app,
+	headless=False,
+	parallel=True,
+	with_coverage=False,
+	ci_build_id=None,
+	cypressargs=None,
 ):
 	"Run UI tests"
 	site = get_site(context)
@@ -860,7 +898,6 @@ def run_ui_tests(
 
 	node_bin = subprocess.getoutput("npm bin")
 	cypress_path = f"{node_bin}/cypress"
-	plugin_path = f"{node_bin}/../cypress-file-upload"
 	drag_drop_plugin_path = f"{node_bin}/../@4tw/cypress-drag-drop"
 	real_events_plugin_path = f"{node_bin}/../cypress-real-events"
 	testing_library_path = f"{node_bin}/../@testing-library"
@@ -869,7 +906,6 @@ def run_ui_tests(
 	# check if cypress in path...if not, install it.
 	if not (
 		os.path.exists(cypress_path)
-		and os.path.exists(plugin_path)
 		and os.path.exists(drag_drop_plugin_path)
 		and os.path.exists(real_events_plugin_path)
 		and os.path.exists(testing_library_path)
@@ -879,11 +915,11 @@ def run_ui_tests(
 		click.secho("Installing Cypress...", fg="yellow")
 		packages = " ".join(
 			[
-				"cypress@^6",
-				"cypress-file-upload@^5",
+				"cypress@^10",
 				"@4tw/cypress-drag-drop@^2",
 				"cypress-real-events",
 				"@testing-library/cypress@^8",
+				"@testing-library/dom@8.17.1",
 				"@cypress/code-coverage@^3",
 			]
 		)
@@ -898,6 +934,9 @@ def run_ui_tests(
 
 	if ci_build_id:
 		formatted_command += f" --ci-build-id {ci_build_id}"
+
+	if cypressargs:
+		formatted_command += " " + " ".join(cypressargs)
 
 	click.secho("Running Cypress...", fg="yellow")
 	frappe.commands.popen(formatted_command, cwd=app_base_path, raise_err=True)

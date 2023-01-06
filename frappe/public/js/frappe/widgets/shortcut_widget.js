@@ -24,7 +24,7 @@ export default class ShortcutWidget extends Widget {
 	}
 
 	setup_events() {
-		this.widget.click(() => {
+		this.widget.click((e) => {
 			if (this.in_customize_mode) return;
 
 			let route = frappe.utils.generate_route({
@@ -33,13 +33,18 @@ export default class ShortcutWidget extends Widget {
 				type: this.type,
 				is_query_report: this.is_query_report,
 				doctype: this.ref_doctype,
-				doc_view: this.doc_view
+				doc_view: this.doc_view,
 			});
 
 			let filters = frappe.utils.get_filter_from_json(this.stats_filter);
 			if (this.type == "DocType" && filters) {
 				frappe.route_options = filters;
 			}
+
+			if (e.ctrlKey || e.metaKey) {
+				frappe.open_in_new_tab = true;
+			}
+
 			frappe.set_route(route);
 		});
 	}
@@ -69,7 +74,9 @@ export default class ShortcutWidget extends Widget {
 
 		this.action_area.empty();
 		const label = get_label();
-		let color = this.color && count ? this.color.toLowerCase() : 'gray';
-		$(`<div class="indicator-pill ellipsis ${color}">${label}</div>`).appendTo(this.action_area);
+		let color = this.color && count ? this.color.toLowerCase() : "gray";
+		$(`<div class="indicator-pill ellipsis ${color}">${label}</div>`).appendTo(
+			this.action_area
+		);
 	}
 }

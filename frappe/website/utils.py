@@ -12,7 +12,7 @@ from werkzeug.wrappers import Response
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import cint, get_time_zone, md_to_html
+from frappe.utils import cint, get_assets_json, get_time_zone, md_to_html
 
 FRONTMATTER_PATTERN = re.compile(r"^\s*(?:---|\+\+\+)(.*?)(?:---|\+\+\+)\s*(.+)$", re.S | re.M)
 H1_TAG_PATTERN = re.compile("<h1>([^<]*)")
@@ -160,6 +160,7 @@ def get_home_page_via_hooks():
 
 def get_boot_data():
 	return {
+		"lang": "en",
 		"sysdefaults": {
 			"float_precision": cint(frappe.get_system_settings("float_precision")) or 3,
 			"date_format": frappe.get_system_settings("date_format") or "yyyy-mm-dd",
@@ -169,6 +170,7 @@ def get_boot_data():
 			"system": get_time_zone(),
 			"user": frappe.db.get_value("User", frappe.session.user, "time_zone") or get_time_zone(),
 		},
+		"assets_json": get_assets_json(),
 	}
 
 
@@ -527,7 +529,8 @@ def build_response(path, data, http_status_code, headers: dict | None = None):
 	response.headers["X-Page-Name"] = path.encode("ascii", errors="xmlcharrefreplace")
 	response.headers["X-From-Cache"] = frappe.local.response.from_cache or False
 
-	add_preload_headers(response)
+	add_preload_for_bundled_assets(response)
+
 	if headers:
 		for key, val in headers.items():
 			response.headers[key] = val.encode("ascii", errors="xmlcharrefreplace")
@@ -557,29 +560,18 @@ def set_content_type(response, data, path):
 	return data
 
 
-def add_preload_headers(response):
-	from bs4 import BeautifulSoup, SoupStrainer
+def add_preload_for_bundled_assets(response):
 
-	try:
-		preload = []
-		strainer = SoupStrainer(re.compile("script|link"))
-		soup = BeautifulSoup(response.data, "html.parser", parse_only=strainer)
-		for elem in soup.find_all("script", src=re.compile(".*")):
-			preload.append(("script", elem.get("src")))
+	links = []
 
-		for elem in soup.find_all("link", rel="stylesheet"):
-			preload.append(("style", elem.get("href")))
+	for css in frappe.local.preload_assets["style"]:
+		links.append(f"<{css}>; rel=preload; as=style")
 
-		links = []
-		for _type, link in preload:
-			links.append(f"<{link}>; rel=preload; as={_type}")
+	for js in frappe.local.preload_assets["script"]:
+		links.append(f"<{js}>; rel=preload; as=script")
 
-		if links:
-			response.headers["Link"] = ",".join(links)
-	except Exception:
-		import traceback
-
-		traceback.print_exc()
+	if links:
+		response.headers["Link"] = ",".join(links)
 
 
 @lru_cache

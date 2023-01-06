@@ -1,6 +1,5 @@
 # Copyright (c) 2022, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
-import unittest
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -344,7 +343,7 @@ class TestCommunicationEmailMixin(FrappeTestCase):
 		user = self.new_user(email="bcc+2@test.com", enabled=0)
 		comm = self.new_communication(bcc=bcc_list)
 		res = comm.get_mail_bcc_with_displayname()
-		self.assertCountEqual(res, ["bcc+1@test.com"])
+		self.assertCountEqual(res, bcc_list)
 		user.delete()
 		comm.delete()
 

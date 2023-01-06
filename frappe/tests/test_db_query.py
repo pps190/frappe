@@ -1,7 +1,6 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
 import datetime
-import unittest
 
 import frappe
 from frappe.core.page.permission_manager.permission_manager import add, reset, update
@@ -11,12 +10,13 @@ from frappe.handler import execute_cmd
 from frappe.model.db_query import DatabaseQuery
 from frappe.permissions import add_user_permission, clear_user_permissions_for_doctype
 from frappe.query_builder import Column
+from frappe.tests.utils import FrappeTestCase
 from frappe.utils.testutils import add_custom_field, clear_custom_fields
 
 test_dependencies = ["User", "Blog Post", "Blog Category", "Blogger"]
 
 
-class TestReportview(unittest.TestCase):
+class TestReportview(FrappeTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 
@@ -42,7 +42,7 @@ class TestReportview(unittest.TestCase):
 			content="test",
 			seen_by=[{"user": "Administrator"}],
 		).insert()
-		result = frappe.db.get_all(
+		result = frappe.get_all(
 			"Note",
 			filters={"name": note.name},
 			fields=["name", "seen_by.user as seen_by"],
@@ -51,11 +51,97 @@ class TestReportview(unittest.TestCase):
 		self.assertEqual(result[0].seen_by, "Administrator")
 		note.delete()
 
+	def test_child_table_join(self):
+		frappe.delete_doc_if_exists("DocType", "Parent DocType 1")
+		frappe.delete_doc_if_exists("DocType", "Parent DocType 2")
+		frappe.delete_doc_if_exists("DocType", "Child DocType")
+		# child table
+		frappe.get_doc(
+			{
+				"doctype": "DocType",
+				"name": "Child DocType",
+				"module": "Custom",
+				"custom": 1,
+				"istable": 1,
+				"fields": [
+					{"label": "Title", "fieldname": "title", "fieldtype": "Data"},
+				],
+			}
+		).insert()
+		# doctype 1
+		frappe.get_doc(
+			{
+				"doctype": "DocType",
+				"name": "Parent DocType 1",
+				"module": "Custom",
+				"custom": 1,
+				"autoname": "autoincrement",
+				"fields": [
+					{"label": "Title", "fieldname": "title", "fieldtype": "Data"},
+					{
+						"label": "Table Field 1",
+						"fieldname": "child",
+						"fieldtype": "Table",
+						"options": "Child DocType",
+					},
+				],
+				"permissions": [{"role": "System Manager"}],
+			}
+		).insert()
+		# doctype 2
+		frappe.get_doc(
+			{
+				"doctype": "DocType",
+				"name": "Parent DocType 2",
+				"module": "Custom",
+				"custom": 1,
+				"autoname": "autoincrement",
+				"fields": [
+					{"label": "Title", "fieldname": "title", "fieldtype": "Data"},
+					{
+						"label": "Table Field 1",
+						"fieldname": "child",
+						"fieldtype": "Table",
+						"options": "Child DocType",
+					},
+				],
+				"permissions": [{"role": "System Manager"}],
+			}
+		).insert()
+
+		# clear records
+		frappe.db.delete("Parent DocType 1")
+		frappe.db.delete("Parent DocType 2")
+		frappe.db.delete("Child DocType")
+
+		# insert records
+		frappe.get_doc(
+			doctype="Parent DocType 1",
+			title="test",
+			child=[{"title": "parent 1 child record 1"}, {"title": "parent 1 child record 2"}],
+		).insert()
+		frappe.get_doc(
+			doctype="Parent DocType 2", title="test", child=[{"title": "parent 2 child record 1"}]
+		).insert()
+
+		# test query
+		results1 = frappe.get_all("Parent DocType 1", fields=["name", "child.title as child_title"])
+		results2 = frappe.get_all("Parent DocType 2", fields=["name", "child.title as child_title"])
+		# check both parents have same name
+		self.assertEqual(results1[0].name, results2[0].name)
+		# check both parents have different number of child records
+		self.assertEqual(len(results1), 2)
+		self.assertEqual(len(results2), 1)
+		parent1_children = [result.child_title for result in results1]
+		self.assertIn("parent 1 child record 1", parent1_children)
+		self.assertIn("parent 1 child record 2", parent1_children)
+		self.assertEqual(results2[0].child_title, "parent 2 child record 1")
+
 	def test_link_field_syntax(self):
 		todo = frappe.get_doc(
 			doctype="ToDo", description="Test ToDo", allocated_to="Administrator"
 		).insert()
-		result = frappe.db.get_all(
+		result = frappe.get_all(
 			"ToDo",
 			filters={"name": todo.name},
 			fields=["name", "allocated_to.email as allocated_user_email"],
@@ -332,6 +418,43 @@ class TestReportview(unittest.TestCase):
 			)
 			self.assertTrue("date_diff" in data[0])
 
+		with self.assertRaises(frappe.DataError):
+			DatabaseQuery("DocType").execute(
+				fields=["name", "issingle", "if (issingle=1, (select name from tabUser), count(name))"],
+				limit_start=0,
+				limit_page_length=1,
+			)
+
+		with self.assertRaises(frappe.DataError):
+			DatabaseQuery("DocType").execute(
+				fields=["name", "issingle", "if(issingle=1, (select name from tabUser), count(name))"],
+				limit_start=0,
+				limit_page_length=1,
+			)
+
+		with self.assertRaises(frappe.DataError):
+			DatabaseQuery("DocType").execute(
+				fields=[
+					"name",
+					"issingle",
+					"( select name from `tabUser` where `tabDocType`.owner = `tabUser`.name )",
+				],
+				limit_start=0,
+				limit_page_length=1,
+				ignore_permissions=True,
+			)
+
+		with self.assertRaises(frappe.DataError):
+			DatabaseQuery("DocType").execute(
+				fields=[
+					"name",
+					"issingle",
+					"(select name from `tabUser` where `tabDocType`.owner = `tabUser`.name )",
+				],
+				limit_start=0,
+				limit_page_length=1,
+			)
+
 	def test_nested_permission(self):
 		frappe.set_user("Administrator")
 		create_nested_doctype()
@@ -426,6 +549,46 @@ class TestReportview(unittest.TestCase):
 			order_by="creation",
 		)
 		self.assertTrue("DefaultValue" in [d["name"] for d in out])
+
+	def test_order_by_group_by_sanitizer(self):
+		# order by with blacklisted function
+		with self.assertRaises(frappe.ValidationError):
+			DatabaseQuery("DocType").execute(
+				fields=["name"],
+				order_by="sleep (1) asc",
+			)
+
+		# group by with blacklisted function
+		with self.assertRaises(frappe.ValidationError):
+			DatabaseQuery("DocType").execute(
+				fields=["name"],
+				group_by="SLEEP(0)",
+			)
+
+		# sub query in order by
+		with self.assertRaises(frappe.ValidationError):
+			DatabaseQuery("DocType").execute(
+				fields=["name"],
+				order_by="(select rank from tabRankedDocTypes where tabRankedDocTypes.name = tabDocType.name) asc",
+			)
+
+		# validate allowed usage
+		DatabaseQuery("DocType").execute(
+			fields=["name"],
+			order_by="name asc",
+		)
+		DatabaseQuery("DocType").execute(
+			fields=["name"],
+			order_by="name asc",
+			group_by="name",
+		)
+
+		# check mariadb specific syntax
+		if frappe.db.db_type == "mariadb":
+			DatabaseQuery("DocType").execute(
+				fields=["name"],
+				order_by="timestamp(modified)",
+			)
 
 	def test_of_not_of_descendant_ancestors(self):
 		frappe.set_user("Administrator")
@@ -744,6 +907,15 @@ class TestReportview(unittest.TestCase):
 		)[0]
 
 		self.assertTrue(dashboard_settings)
+
+	def test_coalesce_with_in_ops(self):
+		self.assertNotIn("ifnull", frappe.get_all("User", {"name": ("in", ["a", "b"])}, run=0))
+		self.assertIn("ifnull", frappe.get_all("User", {"name": ("in", ["a", None])}, run=0))
+		self.assertIn("ifnull", frappe.get_all("User", {"name": ("in", ["a", ""])}, run=0))
+		self.assertIn("ifnull", frappe.get_all("User", {"name": ("in", [])}, run=0))
+		self.assertIn("ifnull", frappe.get_all("User", {"name": ("not in", ["a"])}, run=0))
+		self.assertIn("ifnull", frappe.get_all("User", {"name": ("not in", [])}, run=0))
+		self.assertIn("ifnull", frappe.get_all("User", {"name": ("not in", [""])}, run=0))
 
 
 def add_child_table_to_blog_post():

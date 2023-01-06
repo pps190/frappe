@@ -78,7 +78,13 @@ def get(doctype, name=None, filters=None, parent=None):
 	if frappe.is_table(doctype):
 		check_parent_permission(parent, doctype)
 
-	doc = frappe.get_doc(doctype, name or frappe.parse_json(filters))
+	if name:
+		doc = frappe.get_doc(doctype, name)
+	elif filters or filters == {}:
+		doc = frappe.get_doc(doctype, frappe.parse_json(filters))
+	else:
+		doc = frappe.get_doc(doctype)  # single
+
 	doc.check_permission()
 	return doc.as_dict()
 
@@ -200,9 +206,9 @@ def insert_many(docs=None):
 	if len(docs) > 200:
 		frappe.throw(_("Only 200 inserts allowed in one request"))
 
-	out = set()
+	out = []
 	for doc in docs:
-		out.add(insert_doc(doc).name)
+		out.append(insert_doc(doc).name)
 
 	return out
 
@@ -264,7 +270,7 @@ def delete(doctype, name):
 
 	:param doctype: DocType of the document to be deleted
 	:param name: name of the document to be deleted"""
-	frappe.delete_doc(doctype, name, ignore_missing=False)
+	delete_doc(doctype, name)
 
 
 @frappe.whitelist(methods=["POST", "PUT"])
@@ -298,6 +304,17 @@ def has_permission(doctype, docname, perm_type="read"):
 
 
 @frappe.whitelist()
+def get_doc_permissions(doctype, docname):
+	"""Returns an evaluated document permissions dict like `{"read":1, "write":1}`
+
+	:param doctype: DocType of the document to be evaluated
+	:param docname: `name` of the document to be evaluated
+	"""
+	doc = frappe.get_doc(doctype, docname)
+	return {"permissions": frappe.permissions.get_doc_permissions(doc)}
+
+
+@frappe.whitelist()
 def get_password(doctype, name, fieldname):
 	"""Return a password type property. Only applicable for System Managers
 
@@ -326,11 +343,6 @@ def get_js(items):
 		contentpath = os.path.join(frappe.local.sites_path, *src)
 		with open(contentpath) as srcfile:
 			code = frappe.utils.cstr(srcfile.read())
-
-		if frappe.local.lang != "en":
-			messages = frappe.get_lang_dict("jsfile", contentpath)
-			messages = json.dumps(messages)
-			code += f"\n\n$.extend(frappe._messages, {messages})"
 
 		out.append(code)
 
@@ -456,3 +468,24 @@ def insert_doc(doc) -> "Document":
 		return parent
 
 	return frappe.get_doc(doc).insert()
+
+
+def delete_doc(doctype, name):
+	"""Deletes document
+	if doctype is a child table, then deletes the child record using the parent doc
+	so that the parent doc's `on_update` is called
+	"""
+
+	if frappe.is_table(doctype):
+		values = frappe.db.get_value(doctype, name, ["parenttype", "parent", "parentfield"])
+		if not values:
+			raise frappe.DoesNotExistError
+		parenttype, parent, parentfield = values
+		parent = frappe.get_doc(parenttype, parent)
+		for row in parent.get(parentfield):
+			if row.name == name:
+				parent.remove(row)
+				parent.save()
+				break
+	else:
+		frappe.delete_doc(doctype, name, ignore_missing=False)

@@ -175,7 +175,6 @@ def read_options_from_html(html):
 		except Exception:
 			pass
 
-
 	return str(soup), options
 
 

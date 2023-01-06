@@ -1,15 +1,25 @@
+import itertools
 import operator
 import re
 from ast import literal_eval
 from functools import cached_property
 from types import BuiltinFunctionType
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Callable
+
+import sqlparse
+from pypika.dialects import MySQLQueryBuilder, PostgreSQLQueryBuilder
 
 import frappe
 from frappe import _
+from frappe.database.utils import NestedSetHierarchy, is_pypika_function_object
 from frappe.model.db_query import get_timespan_date_range
 from frappe.query_builder import Criterion, Field, Order, Table, functions
 from frappe.query_builder.functions import Function, SqlFunctions
+from frappe.query_builder.utils import PseudoColumnMapper
+from frappe.utils.data import MARIADB_SPECIFIC_COMMENT
+
+if TYPE_CHECKING:
+	from frappe.query_builder import DocType
 
 TAB_PATTERN = re.compile("^tab")
 WORDS_PATTERN = re.compile(r"\w+")
@@ -41,6 +51,8 @@ def func_in(key: Field, value: list | tuple) -> frappe.qb:
 	Returns:
 	        frappe.qb: `frappe.qb object with `IN`
 	"""
+	if isinstance(value, str):
+		value = value.split(",")
 	return key.isin(value)
 
 
@@ -57,7 +69,7 @@ def not_like(key: Field, value: str) -> frappe.qb:
 	return key.not_like(value)
 
 
-def func_not_in(key: Field, value: list | tuple):
+def func_not_in(key: Field, value: list | tuple | str):
 	"""Wrapper method for `NOT IN`
 
 	Args:
@@ -67,6 +79,8 @@ def func_not_in(key: Field, value: list | tuple):
 	Returns:
 	        frappe.qb: `frappe.qb object with `NOT IN`
 	"""
+	if isinstance(value, str):
+		value = value.split(",")
 	return key.notin(value)
 
 
@@ -115,19 +129,6 @@ def func_timespan(key: Field, value: str) -> frappe.qb:
 	return func_between(key, get_timespan_date_range(value))
 
 
-def make_function(key: Any, value: int | str):
-	"""returns fucntion query
-
-	Args:
-	        key (Any): field
-	        value (Union[int, str]): criterion
-
-	Returns:
-	        frappe.qb: frappe.qb object
-	"""
-	return OPERATOR_MAP[value[0].casefold()](key, value[1])
-
-
 def change_orderby(order: str):
 	"""Convert orderby to standart Order object
 
@@ -155,6 +156,52 @@ def literal_eval_(literal):
 		return literal
 
 
+def has_function(field):
+	_field = field.casefold() if (isinstance(field, str) and "`" not in field) else field
+	if not issubclass(type(_field), Criterion):
+		if any([f"{func}(" in _field for func in SQL_FUNCTIONS]) or "(" in _field:
+			return True
+
+
+def table_from_string(table: str) -> "DocType":
+	if frappe.db.db_type == "postgres":
+		table_name = table.split('"', maxsplit=1)[1].split(".")[0][3:].replace('"', "")
+	else:
+		table_name = table.split("`", maxsplit=1)[1].split(".")[0][3:].replace("`", "")
+	return frappe.qb.DocType(table_name=table_name)
+
+
+def get_nested_set_hierarchy_result(hierarchy: str, field: str, table: str):
+	ref_doctype = table
+	try:
+		lft, rgt = (
+			frappe.qb.from_(ref_doctype).select("lft", "rgt").where(Field("name") == field).run()[0]
+		)
+	except IndexError:
+		lft, rgt = None, None
+
+	if hierarchy in ("descendants of", "not descendants of"):
+		result = (
+			frappe.qb.from_(ref_doctype)
+			.select(Field("name"))
+			.where(Field("lft") > lft)
+			.where(Field("rgt") < rgt)
+			.orderby(Field("lft"), order=Order.asc)
+			.run()
+		)
+	else:
+		# Get ancestor elements of a DocType with a tree structure
+		result = (
+			frappe.qb.from_(ref_doctype)
+			.select(Field("name"))
+			.where(Field("lft") < lft)
+			.where(Field("rgt") > rgt)
+			.orderby(Field("lft"), order=Order.desc)
+			.run()
+		)
+	return result
+
+
 # default operators
 OPERATOR_MAP: dict[str, Callable] = {
 	"+": operator.add,
@@ -177,7 +224,7 @@ OPERATOR_MAP: dict[str, Callable] = {
 	"between": func_between,
 	"is": func_is,
 	"timespan": func_timespan,
-	# TODO: Add support for nested set
+	"nested_set": NestedSetHierarchy,
 	# TODO: Add support for custom operators (WIP) - via filters_config hooks
 }
 
@@ -297,7 +344,7 @@ class Engine:
 				else:
 					_operator = self.OPERATOR_MAP[filters[1].casefold()]
 					if not isinstance(filters[0], str):
-						conditions = make_function(filters[0], filters[2])
+						conditions = self.make_function_for_filters(filters[0], filters[2])
 						break
 					conditions = conditions.where(_operator(Field(filters[0]), filters[2]))
 					break
@@ -315,6 +362,8 @@ class Engine:
 		        frappe.qb: conditions object
 		"""
 		conditions = self.get_condition(table, **kwargs)
+		if isinstance(table, str):
+			table = frappe.qb.DocType(table)
 		if not filters:
 			conditions = self.add_conditions(conditions, **kwargs)
 			return conditions
@@ -323,20 +372,40 @@ class Engine:
 			if isinstance(value, bool):
 				filters.update({key: str(int(value))})
 
+		filters = {
+			(self.get_function_object(k) if has_function(k) else k): v for k, v in filters.items()
+		}
 		for key in filters:
 			value = filters.get(key)
 			_operator = self.OPERATOR_MAP["="]
 
 			if not isinstance(key, str):
-				conditions = conditions.where(make_function(key, value))
+				conditions = conditions.where(self.make_function_for_filters(key, value))
 				continue
+			# Nested set support
 			if isinstance(value, (list, tuple)):
+				if value[0] in self.OPERATOR_MAP["nested_set"]:
+					hierarchy, _field = value
+					result = get_nested_set_hierarchy_result(hierarchy, _field, table)
+					_operator = (
+						self.OPERATOR_MAP["not in"]
+						if hierarchy in ("not ancestors of", "not descendants of")
+						else self.OPERATOR_MAP["in"]
+					)
+					if result:
+						result = list(itertools.chain.from_iterable(result))
+						conditions = conditions.where(_operator(getattr(table, key), result))
+					else:
+						conditions = conditions.where(_operator(getattr(table, key), ("",)))
+					# Allow additional conditions
+					break
+
 				_operator = self.OPERATOR_MAP[value[0].casefold()]
 				_value = value[1] if value[1] else ("",)
-				conditions = conditions.where(_operator(Field(key), _value))
+				conditions = conditions.where(_operator(getattr(table, key), _value))
 			else:
 				if value is not None:
-					conditions = conditions.where(_operator(Field(key), value))
+					conditions = conditions.where(_operator(getattr(table, key), value))
 				else:
 					_table = conditions._from[0]
 					field = getattr(_table, key)
@@ -370,6 +439,12 @@ class Engine:
 
 		return criterion
 
+	def make_function_for_filters(self, key, value: int | str):
+		value = list(value)
+		if isinstance(value[1], str) and has_function(value[1]):
+			value[1] = self.get_function_object(value[1])
+		return OPERATOR_MAP[value[0].casefold()](key, value[1])
+
 	def get_function_object(self, field: str) -> "Function":
 		"""Expects field to look like 'SUM(*)' or 'name' or something similar. Returns PyPika Function object"""
 		func = field.split("(", maxsplit=1)[0].capitalize()
@@ -392,15 +467,29 @@ class Engine:
 						if isinstance(operator_mapping, BuiltinFunctionType):
 							has_primitive_operator = True
 							field = operator_mapping(
-								*map(lambda field: Field(field.strip()), arg.split(_operator)),
+								*map(
+									lambda field: Field(field.strip())
+									if "`" not in field
+									else PseudoColumnMapper(field.strip()),
+									arg.split(_operator),
+								),
 							)
 
-				field = Field(initial_fields) if not has_primitive_operator else field
+				field = (
+					(Field(initial_fields) if "`" not in initial_fields else PseudoColumnMapper(initial_fields))
+					if not has_primitive_operator
+					else field
+				)
 			else:
 				field = initial_fields
 
 			_args.append(field)
+
+		if alias and "`" in alias:
+			alias = alias.replace("`", "")
 		try:
+			if func.casefold() == "now":
+				return getattr(functions, func)()
 			return getattr(functions, func)(*_args, alias=alias or None)
 		except AttributeError:
 			# Fall back for functions not present in `SqlFunctions``
@@ -413,7 +502,7 @@ class Engine:
 	def function_objects_from_list(self, fields):
 		functions = []
 		for field in fields:
-			field = field.casefold() if isinstance(field, str) else field
+			field = field.casefold() if (isinstance(field, str) and "`" not in field) else field
 			if not issubclass(type(field), Criterion):
 				if any([f"{func}(" in field for func in SQL_FUNCTIONS]) or "(" in field:
 					functions.append(field)
@@ -422,11 +511,20 @@ class Engine:
 
 	def remove_string_functions(self, fields, function_objects):
 		"""Remove string functions from fields which have already been converted to function objects"""
+
+		def _remove_string_aliasing(function, fields: list | str):
+			if function.alias:
+				to_replace = " as " + function.alias.casefold()
+				if to_replace in fields:
+					fields = fields.replace(to_replace, "")
+				elif " as " + f"`{function.alias.casefold()}" in fields:
+					fields = fields.replace(" as " + f"`{function.alias.casefold()}`", "")
+			return fields
+
 		for function in function_objects:
 			if isinstance(fields, str):
-				if function.alias:
-					fields = fields.replace(" as " + function.alias.casefold(), "")
-				fields = BRACKETS_PATTERN.sub("", fields.replace(function.name.casefold(), ""))
+				fields = _remove_string_aliasing(function, fields)
+				fields = BRACKETS_PATTERN.sub("", re.sub(function.name, "", fields, flags=re.IGNORECASE))
 				# Check if only comma is left in fields after stripping functions.
 				if "," in fields and (len(fields.strip()) == 1):
 					fields = ""
@@ -434,24 +532,95 @@ class Engine:
 				updated_fields = []
 				for field in fields:
 					if isinstance(field, str):
-						if function.alias:
-							field = field.replace(" as " + function.alias.casefold(), "")
-						field = (
-							BRACKETS_PATTERN.sub("", field).strip().casefold().replace(function.name.casefold(), "")
+						field = _remove_string_aliasing(function, field)
+						substituted_string = (
+							BRACKETS_PATTERN.sub("", field).strip().casefold()
+							if "`" not in field
+							else BRACKETS_PATTERN.sub("", field).strip()
 						)
-						updated_fields.append(field)
+						# This is done to avoid casefold of table name.
+						if substituted_string.casefold() == function.name.casefold():
+							replaced_string = substituted_string.casefold().replace(function.name.casefold(), "")
+						else:
+							replaced_string = substituted_string.replace(function.name.casefold(), "")
+						updated_fields.append(replaced_string)
+				fields = [field for field in updated_fields if field]
+		return fields
 
-					fields = [field for field in updated_fields if field]
+	def get_fieldnames_from_child_table(self, doctype, fields):
+		# Hacky and flaky implementation of implicit joins.
+		# convert child_table.fieldname to `tabChild DocType`.`fieldname`
+		_fields = []
+		for field in fields:
+			if "." in field and "tab" not in field:
+				alias = None
+				if " as " in field:
+					field, alias = field.split(" as ")
+				fieldname, linked_fieldname = field.split(".")
+				linked_doctype = frappe.get_meta(doctype).get_field(fieldname).options
+
+				field = f"`tab{linked_doctype}`.`{linked_fieldname}`"
+				if alias:
+					field = f"{field} {alias}"
+			_fields.append(field)
+		return _fields
+
+	def sanitize_fields(self, fields: str | list | tuple):
+		is_mariadb = frappe.db.db_type == "mariadb"
+
+		def _sanitize_field(field: str):
+			if not isinstance(field, str):
+				return field
+			stripped_field = sqlparse.format(field, strip_comments=True, keyword_case="lower")
+			if is_mariadb:
+				return MARIADB_SPECIFIC_COMMENT.sub("", stripped_field)
+			return stripped_field
+
+		if isinstance(fields, (list, tuple)):
+			return [_sanitize_field(field) for field in fields]
+		elif isinstance(fields, str):
+			return _sanitize_field(fields)
 
 		return fields
 
-	def set_fields(self, fields, **kwargs):
+	def get_list_fields(self, table: str, fields: list) -> list:
+		updated_fields = []
+		if issubclass(type(fields), Criterion) or "*" in fields:
+			return fields
+		fields = self.get_fieldnames_from_child_table(doctype=table, fields=fields)
+		for field in fields:
+			if not isinstance(field, Criterion) and field:
+				if " as " in field:
+					field, reference = field.split(" as ")
+					if "`" in field:
+						updated_fields.append(PseudoColumnMapper(f"{field} {reference}"))
+					else:
+						updated_fields.append(Field(field.strip()).as_(reference))
+				elif "`" in str(field):
+					updated_fields.append(PseudoColumnMapper(field.strip()))
+				else:
+					updated_fields.append(Field(field))
+		return updated_fields
+
+	def get_string_fields(self, fields: str) -> Field:
+		if fields == "*":
+			return fields
+		if "`" in fields:
+			fields = PseudoColumnMapper(fields)
+		if " as " in str(fields):
+			fields, reference = str(fields).split(" as ")
+			if "`" in str(fields):
+				fields = PseudoColumnMapper(f"{fields} {reference}")
+			else:
+				fields = Field(fields).as_(reference)
+		return fields
+
+	def set_fields(self, table: str, fields, **kwargs) -> list:
 		fields = kwargs.get("pluck") if kwargs.get("pluck") else fields or "name"
+		fields = self.sanitize_fields(fields)
 		if isinstance(fields, list) and None in fields and Field not in fields:
 			return None
-
 		function_objects = []
-
 		is_list = isinstance(fields, (list, tuple, set))
 		if is_list and len(fields) == 1:
 			fields = fields[0]
@@ -462,7 +631,7 @@ class Engine:
 
 		is_str = isinstance(fields, str)
 		if is_str:
-			fields = fields.casefold()
+			fields = fields.casefold() if "`" not in fields else fields
 			function_objects += self.function_objects_from_string(fields=fields)
 
 		fields = self.remove_string_functions(fields, function_objects)
@@ -472,27 +641,9 @@ class Engine:
 			is_list, is_str = True, False
 
 		if is_str:
-			if fields == "*":
-				return fields
-			if " as " in fields:
-				fields, reference = fields.split(" as ")
-				fields = Field(fields).as_(reference)
-
+			fields = self.get_string_fields(fields)
 		if not is_str and fields:
-			if issubclass(type(fields), Criterion):
-				return fields
-			updated_fields = []
-			if "*" in fields:
-				return fields
-			for field in fields:
-				if not isinstance(field, Criterion) and field:
-					if " as " in field:
-						field, reference = field.split(" as ")
-						updated_fields.append(Field(field.strip()).as_(reference))
-					else:
-						updated_fields.append(Field(field))
-
-					fields = updated_fields
+			fields = self.get_list_fields(table, fields)
 
 		# Need to check instance again since fields modified.
 		if not isinstance(fields, (list, tuple, set)):
@@ -501,27 +652,94 @@ class Engine:
 		fields.extend(function_objects)
 		return fields
 
+	def join_child_tables(
+		self,
+		criterion: Criterion,
+		join_type: str,
+		child_table: Table,
+		parent_table: Table,
+	) -> Criterion:
+		if self.joined_tables.get(join_type) != child_table:
+			criterion = getattr(criterion, join_type)(child_table).on(
+				(child_table.parent == parent_table.name)
+				& (child_table.parenttype == TAB_PATTERN.sub("", parent_table._table_name))
+			)
+			self.joined_tables[join_type] = child_table
+		return criterion
+
+	def join(self, criterion, fields, table, join_type):
+		"""Handles all join operations on criterion objects"""
+		has_join = False
+		table_pattern = (
+			re.compile(r"`\btab\w+") if frappe.db.db_type == "mariadb" else re.compile(r'"\btab\w+')
+		)
+
+		def _update_pypika_fields(field):
+			if not is_pypika_function_object(field):
+				field = field if isinstance(field, (str, PseudoColumnMapper)) else field.get_sql()
+				if not table_pattern.search(str(field)):
+					if isinstance(field, PseudoColumnMapper):
+						field = field.get_sql()
+					return getattr(frappe.qb.DocType(table), field)
+				else:
+					return field
+			else:
+				field.args = [getattr(frappe.qb.DocType(table), arg.get_sql()) for arg in field.args]
+				return field
+
+		if not isinstance(fields, Criterion):
+			for field in fields:
+				# Only perform this bit if foreign doctype in fields
+				if (
+					not is_pypika_function_object(field)
+					and (str(field).startswith('"tab') or str(field).startswith("`tab"))
+					and (f"`tab{table}`" not in str(field) and f'tab{table}"' not in str(field))
+				):
+					has_join = True
+					child_table = table_from_string(str(field))
+					parent_table = frappe.qb.DocType(table) if not isinstance(table, Table) else table
+					criterion = self.join_child_tables(
+						criterion=criterion,
+						join_type=join_type,
+						child_table=child_table,
+						parent_table=parent_table,
+					)
+
+			if has_join:
+				fields = [_update_pypika_fields(field) for field in fields]
+
+		if len(self.tables) > 1:
+			parent_table = self.tables[table]
+			child_tables = list(self.tables.values())[1:]
+			for child_table in child_tables:
+				criterion = self.join_child_tables(
+					criterion,
+					join_type=join_type,
+					child_table=child_table,
+					parent_table=parent_table,
+				)
+
+		return criterion, fields
+
 	def get_query(
 		self,
 		table: str,
 		fields: list | tuple,
 		filters: dict[str, str | int] | str | int | list[list | str | int] = None,
 		**kwargs,
-	):
+	) -> MySQLQueryBuilder | PostgreSQLQueryBuilder:
 		# Clean up state before each query
 		self.tables = {}
+		self.joined_tables = {}
+		self.linked_doctype = None
+		self.fieldname = None
+
 		criterion = self.build_conditions(table, filters, **kwargs)
-		fields = self.set_fields(kwargs.get("field_objects") or fields, **kwargs)
-
-		join = kwargs.get("join").replace(" ", "_") if kwargs.get("join") else "left_join"
-
-		if len(self.tables) > 1:
-			primary_table = self.tables[table]
-			del self.tables[table]
-			for table_object in self.tables.values():
-				criterion = getattr(criterion, join)(table_object).on(
-					table_object.parent == primary_table.name
-				)
+		fields = self.set_fields(table, fields, **kwargs)
+		join_type = kwargs.get("join").replace(" ", "_") if kwargs.get("join") else "left_join"
+		criterion, fields = self.join(
+			criterion=criterion, fields=fields, table=table, join_type=join_type
+		)
 
 		if isinstance(fields, (list, tuple)):
 			query = criterion.select(*fields)

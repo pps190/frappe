@@ -1,7 +1,6 @@
-import "./jquery-bootstrap";
+import "./libs.bundle.js";
 import "./frappe/class.js";
 import "./frappe/polyfill.js";
-import "./lib/moment.js";
 import "./frappe/provide.js";
 import "./frappe/translate.js";
 import "./frappe/form/formatters.js";
@@ -22,7 +21,6 @@ import "./frappe/model/model.js";
 import "./frappe/model/perm.js";
 
 import "./bootstrap-4-web.bundle";
-
 
 import "../../website/js/website.js";
 import "./frappe/socketio_client.js";
