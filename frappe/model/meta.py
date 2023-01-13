@@ -134,12 +134,10 @@ class Meta(Document):
 			self.init_field_caches()
 			return
 
-		has_custom_fields = self.add_custom_fields()
+		self.add_custom_fields()
 		self.apply_property_setters()
 		self.init_field_caches()
-
-		if has_custom_fields:
-			self.sort_fields()
+		self.sort_fields()
 
 		self.get_valid_columns()
 		self.set_custom_permissions()
@@ -361,7 +359,6 @@ class Meta(Document):
 			return
 
 		self.extend("fields", custom_fields)
-		return True
 
 	def apply_property_setters(self):
 		"""
@@ -372,11 +369,8 @@ class Meta(Document):
 		if not frappe.db.table_exists("Property Setter"):
 			return
 
-		property_setters = frappe.db.sql(
-			"""select * from `tabProperty Setter` where
-			doc_type=%s""",
-			(self.name,),
-			as_dict=1,
+		property_setters = frappe.db.get_values(
+			"Property Setter", fieldname="*", filters={"doc_type": self.name}, as_dict=1
 		)
 
 		if not property_setters:
@@ -451,8 +445,41 @@ class Meta(Document):
 		else:
 			self._table_fields = self.get("fields", {"fieldtype": ["in", table_fields]})
 
+	def sort_fields_based_on_field_order(self):
+		if not hasattr(self, "field_order") or not self.field_order:
+			return
+
+		sorted_fields = []
+		fields_to_remove = []
+
+		self.field_order = self.field_order.replace(" ", "").split(",")
+
+		# Remove fields not present in self.fields.
+		for field in self.field_order:
+			if field not in self._fields:
+				fields_to_remove.append(field)
+
+		for field in fields_to_remove:
+			self.field_order.remove(field)
+
+		# Add fields present in self.fields
+		for field in self.fields:
+			if field.fieldname not in self.field_order:
+				# Insert after logic handles rearranding of custom fields
+				self.field_order.append(field.fieldname)
+
+		for idx, fieldname in enumerate(self.field_order, 1):
+			field = self._fields[fieldname]
+			field.idx = idx
+			sorted_fields.append(field)
+
+		self.fields = sorted_fields
+
 	def sort_fields(self):
-		"""Sort custom fields on the basis of insert_after"""
+		"""Sort standard fields on the basis of property setter,
+		and custom fields on the basis of insert_after"""
+
+		self.sort_fields_based_on_field_order()
 
 		field_order = []
 		insert_after_map = {}
