@@ -1389,7 +1389,12 @@ frappe.views.QueryReport = class QueryReport extends frappe.views.BaseList {
 			if (name_len > 200) break;
 			filter_values.push(applied_filters[key]);
 		}
-		print_settings.report_name = `${__(this.report_name)}_${filter_values.join("_")}.pdf`;
+		if (this.report_name === "Accounts Receivable") {
+			console.log(filter_values);
+			print_settings.report_name = `${__("Accounts Receivable")} ${filter_values[filter_values.length - 2]}.pdf`;
+		} else {
+			print_settings.report_name = `${__(this.report_name)}_${filter_values.join("_")}.pdf`;
+		}
 		frappe.render_pdf(html, print_settings);
 	}
 
