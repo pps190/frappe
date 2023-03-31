@@ -208,8 +208,8 @@ def get_permitted_fields(
 		meta_fields = meta.default_fields.copy()
 		optional_meta_fields = [x for x in optional_fields if x in valid_columns]
 
-	if meta.istable:
-		meta_fields.extend(child_table_fields)
+		if meta.istable:
+			meta_fields.extend(child_table_fields)
 
 	return (
 		meta_fields
