@@ -190,7 +190,6 @@ def delete_fields(args_dict, delete=0):
 			# commit the results to db
 			frappe.db.commit()
 
-
 def get_permitted_fields(
 	doctype: str, parenttype: str | None = None, user: str | None = None
 ) -> list[str]:
@@ -211,8 +210,6 @@ def get_permitted_fields(
 		if meta.istable:
 			meta_fields.extend(child_table_fields)
 
-	return (
-		meta_fields
-		+ meta.get_permitted_fieldnames(parenttype=parenttype, user=user)
-		+ optional_meta_fields
-	)
+		return meta_fields + permitted_fields + optional_meta_fields
+
+	return []
