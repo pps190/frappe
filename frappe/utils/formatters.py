@@ -121,7 +121,7 @@ def format_value(value, df=None, doc=None, currency=None, translated=False, form
 		return format_duration(value, hide_days)
 
 	elif df.get("fieldtype") == "Text Editor":
-		return f"<div class='ql-snow'>{value}</div>"
+		return f"<span class='ql-snow'>{value}</div>"
 
 	elif df.get("fieldtype") in ["Link", "Dynamic Link"]:
 		if not doc or not doc.get("__link_titles") or not df.options:
