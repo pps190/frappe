@@ -304,10 +304,10 @@ frappe.ui.form.ControlTextEditor = class ControlTextEditor extends frappe.ui.for
 
 		try {
 			if (!$(value).find(".ql-editor").length) {
-				value = `<div class="ql-editor read-mode">${value}</div>`;
+				value = `<span class="ql-editor read-mode">${value}</span>`;
 			}
 		} catch (e) {
-			value = `<div class="ql-editor read-mode">${value}</div>`;
+			value = `<span class="ql-editor read-mode">${value}</span>`;
 		}
 
 		return value;

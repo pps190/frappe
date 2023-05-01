@@ -298,10 +298,10 @@ frappe.form.formatters = {
 				!$(formatted_value).find(".ql-editor").length &&
 				!$(formatted_value).hasClass("ql-editor")
 			) {
-				formatted_value = `<div class="ql-editor read-mode">${formatted_value}</div>`;
+				formatted_value = `<span class="ql-editor read-mode">${formatted_value}</span>`;
 			}
 		} catch (e) {
-			formatted_value = `<div class="ql-editor read-mode">${formatted_value}</div>`;
+			formatted_value = `<span class="ql-editor read-mode">${formatted_value}</span>`;
 		}
 
 		return formatted_value;

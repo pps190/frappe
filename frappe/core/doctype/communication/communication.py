@@ -146,7 +146,7 @@ class Communication(Document, CommunicationEmailMixin):
 			return
 
 		soup = BeautifulSoup(self.content, "html.parser")
-		email_body = soup.find("div", {"class": "ql-editor read-mode"})
+		email_body = soup.find("span", {"class": "ql-editor read-mode"})
 
 		if not email_body:
 			return
@@ -171,7 +171,7 @@ class Communication(Document, CommunicationEmailMixin):
 			return
 
 		soup = BeautifulSoup(signature, "html.parser")
-		html_signature = soup.find("div", {"class": "ql-editor read-mode"})
+		html_signature = soup.find("span", {"class": "ql-editor read-mode"})
 		_signature = None
 		if html_signature:
 			_signature = html_signature.renderContents()
