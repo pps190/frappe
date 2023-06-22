@@ -52,6 +52,31 @@ def pdf_footer_html(soup, head, content, styles, html_id, css):
 	)
 
 
+def pdf_header_html(soup, head, content, styles, html_id, css):
+	return frappe.render_template(
+		"templates/print_formats/pdf_header_footer.html",
+		{
+			"head": head,
+			"content": content,
+			"styles": styles,
+			"html_id": html_id,
+			"css": css,
+			"lang": frappe.local.lang,
+			"layout_direction": "rtl" if is_rtl() else "ltr",
+		},
+	)
+
+
+def pdf_body_html(template, args, **kwargs):
+	return template.render(args, filters={"len": len})
+
+
+def pdf_footer_html(soup, head, content, styles, html_id, css):
+	return pdf_header_html(
+		soup=soup, head=head, content=content, styles=styles, html_id=html_id, css=css
+	)
+
+
 def get_pdf(html, options=None, output: PdfWriter | None = None):
 	html = scrub_urls(html)
 	html, options = prepare_options(html, options)

@@ -165,8 +165,8 @@ class CustomizeForm(Document):
 		validate_autoincrement_autoname(self)
 		self.flags.update_db = False
 		self.flags.rebuild_doctype_for_global_search = False
-		self.set_property_setters()
 		self.update_custom_fields()
+		self.set_property_setters()
 		self.set_name_translation()
 		validate_fields_for_doctype(self.doc_type)
 		check_email_append_to(self)
@@ -202,6 +202,7 @@ class CustomizeForm(Document):
 
 		# doctype
 		self.set_property_setters_for_doctype(meta)
+		self.set_property_setter_for_field_order(meta)
 
 		# docfield
 		for df in self.get("fields"):
