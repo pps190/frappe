@@ -81,7 +81,15 @@ def search_widget(
 		try:
 			is_whitelisted(frappe.get_attr(query))
 			frappe.response["values"] = frappe.call(
-				query, doctype, txt, searchfield, start, page_length, filters, as_dict=as_dict
+				query,
+				doctype,
+				txt,
+				searchfield,
+				start,
+				page_length,
+				filters,
+				as_dict=as_dict,
+				reference_doctype=reference_doctype,
 			)
 		except frappe.exceptions.PermissionError as e:
 			if frappe.local.conf.developer_mode:
@@ -303,8 +311,8 @@ def validate_and_sanitize_search_inputs(fn):
 
 @frappe.whitelist()
 def get_names_for_mentions(search_term):
-	users_for_mentions = frappe.cache().get_value("users_for_mentions", get_users_for_mentions)
-	user_groups = frappe.cache().get_value("user_groups", get_user_groups)
+	users_for_mentions = frappe.cache.get_value("users_for_mentions", get_users_for_mentions)
+	user_groups = frappe.cache.get_value("user_groups", get_user_groups)
 
 	filtered_mentions = []
 	for mention_data in users_for_mentions + user_groups:

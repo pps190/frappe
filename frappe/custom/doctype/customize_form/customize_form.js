@@ -81,15 +81,13 @@ frappe.ui.form.on("Customize Form", {
 
 	add_customize_child_table_button: function (frm) {
 		frm.doc.fields.forEach(function (f) {
-			if (f.fieldtype == "Table") {
-				frm.add_custom_button(
-					f.options,
-					function () {
-						frm.set_value("doc_type", f.options);
-					},
-					__("Customize Child Table")
-				);
-			}
+			if (!in_list(["Table", "Table MultiSelect"], f.fieldtype)) return;
+
+			frm.add_custom_button(
+				f.options,
+				() => frm.set_value("doc_type", f.options),
+				__("Customize Child Table")
+			);
 		});
 	},
 
@@ -102,19 +100,20 @@ frappe.ui.form.on("Customize Form", {
 				frm.page.set_title(__("Customize Form - {0}", [frm.doc.doc_type]));
 				frappe.customize_form.set_primary_action(frm);
 
-				if (!frm.is_new()) {
-					frm.add_custom_button(
-						__("Try new form builder", [__(frm.doc.doc_type)]),
-						() => {
-							frappe.set_route("form-builder", frm.doc.doc_type, "customize");
-						}
-					);
-				}
+				render_form_builder_message(frm);
 
 				frm.add_custom_button(
 					__("Go to {0} List", [__(frm.doc.doc_type)]),
 					function () {
 						frappe.set_route("List", frm.doc.doc_type);
+					},
+					__("Actions")
+				);
+
+				frm.add_custom_button(
+					__("Set Permissions"),
+					function () {
+						frappe.set_route("permission-manager", frm.doc.doc_type);
 					},
 					__("Actions")
 				);
@@ -128,17 +127,17 @@ frappe.ui.form.on("Customize Form", {
 				);
 
 				frm.add_custom_button(
-					__("Reset to defaults"),
-					function () {
-						frappe.customize_form.confirm(__("Remove all customizations?"), frm);
+					__("Reset Layout"),
+					() => {
+						frm.trigger("reset_layout");
 					},
 					__("Actions")
 				);
 
 				frm.add_custom_button(
-					__("Set Permissions"),
+					__("Reset All Customizations"),
 					function () {
-						frappe.set_route("permission-manager", frm.doc.doc_type);
+						frappe.customize_form.confirm(__("Remove all customizations?"), frm);
 					},
 					__("Actions")
 				);
@@ -171,6 +170,27 @@ frappe.ui.form.on("Customize Form", {
 		if (doc_type) {
 			setTimeout(() => frm.set_value("doc_type", doc_type, false, true), 1000);
 		}
+	},
+
+	reset_layout(frm) {
+		frappe.confirm(
+			__("Layout will be reset to standard layout, are you sure you want to do this?"),
+			() => {
+				return frm.call({
+					doc: frm.doc,
+					method: "reset_layout",
+					callback: function (r) {
+						if (!r.exc) {
+							frappe.show_alert({
+								message: __("Layout Reset"),
+								indicator: "green",
+							});
+							frappe.customize_form.clear_locals_and_refresh(frm);
+						}
+					},
+				});
+			}
+		);
 	},
 
 	setup_export(frm) {
@@ -238,10 +258,23 @@ frappe.ui.form.on("Customize Form", {
 // can't delete standard fields
 frappe.ui.form.on("Customize Form Field", {
 	before_fields_remove: function (frm, doctype, name) {
-		var row = frappe.get_doc(doctype, name);
+		const row = frappe.get_doc(doctype, name);
+
+		if (row.is_system_generated) {
+			frappe.throw(
+				__(
+					"Cannot delete system generated field <strong>{0}</strong>. You can hide it instead.",
+					[__(row.label) || row.fieldname]
+				)
+			);
+		}
+
 		if (!(row.is_custom_field || row.__islocal)) {
-			frappe.msgprint(__("Cannot delete standard field. You can hide it if you want"));
-			throw "cannot delete standard field";
+			frappe.throw(
+				__("Cannot delete standard field <strong>{0}</strong>. You can hide it instead.", [
+					__(row.label) || row.fieldname,
+				])
+			);
 		}
 	},
 	fields_add: function (frm, cdt, cdn) {
@@ -399,5 +432,32 @@ frappe.customize_form.clear_locals_and_refresh = function (frm) {
 	delete frappe.meta.docfield_copy[frm.doc.doc_type];
 	frm.refresh();
 };
+
+function render_form_builder_message(frm) {
+	$(frm.fields_dict["try_form_builder_html"].wrapper).empty();
+	if (!frm.is_new() && frm.fields_dict["try_form_builder_html"]) {
+		let title = __("Use Form Builder to visually customize your form layout");
+		let msg = __(
+			"You can drag and drop fields to create your form layout, add tabs, sections and columns to organize your form and update field properties all from one screen."
+		);
+
+		let message = `
+		<div class="flex form-message blue p-3">
+			<div class="mr-3"><img style="border-radius: var(--border-radius-md)" width="275" src="/assets/frappe/images/form-builder.gif"></div>
+			<div>
+				<p style="font-size: var(--text-lg)">${title}</p>
+				<p>${msg}</p>
+				<div>
+					<a class="btn btn-primary btn-sm" href="/app/form-builder/${frm.doc.doc_type}/customize">
+						${__("Form Builder")} ${frappe.utils.icon("right", "xs")}
+					</a>
+				</div>
+			</div>
+		</div>
+		`;
+
+		$(frm.fields_dict["try_form_builder_html"].wrapper).html(message);
+	}
+}
 
 extend_cscript(cur_frm.cscript, new frappe.model.DocTypeController({ frm: cur_frm }));
