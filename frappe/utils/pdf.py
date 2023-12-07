@@ -132,6 +132,8 @@ def prepare_options(html, options):
 		options["margin-right"] = "0mm"
 		options["margin-top"] = "5mm"
 		options["margin-bottom"] = "5mm"
+	else:
+		options["footer-center"] = "[page]/[topage]"
 	return html, options
 
 
