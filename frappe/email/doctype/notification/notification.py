@@ -97,12 +97,14 @@ def get_context(context):
 		reference_date = add_to_date(nowdate(), days=diff_days)
 		reference_date_start = reference_date + " 00:00:00.000000"
 		reference_date_end = reference_date + " 23:59:59.000000"
+		print("date_changed", self.date_changed)
+		print("refernce_date_start", reference_date_start)
 
 		doc_list = frappe.get_all(
 			self.document_type,
 			fields="name",
 			filters=[
-				{self.date_changed: (">=", reference_date_start)},
+#				{self.date_changed: (">=", reference_date_start)},
 				{self.date_changed: ("<=", reference_date_end)},
 			],
 		)
