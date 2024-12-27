@@ -127,6 +127,12 @@ def prepare_options(html, options):
 	else:
 		options["page-size"] = pdf_page_size
 
+	if hasattr(frappe.form_dict, "doctype") and frappe.form_dict.doctype in ("Sales Invoice", "Proforma"):
+		options["margin-left"] = "0mm"
+		options["margin-right"] = "0mm"
+		options["margin-top"] = "5mm"
+		options["margin-bottom"] = "5mm"
+
 	return html, options
 
 
