@@ -132,6 +132,9 @@ def prepare_options(html, options):
 		options["margin-right"] = "0mm"
 		options["margin-top"] = "5mm"
 		options["margin-bottom"] = "5mm"
+	elif hasattr(frappe.form_dict, "html"):
+		options["margin-bottom"] = "10mm"
+		options["margin-top"] = "5mm"
 
 	return html, options
 
@@ -214,6 +217,9 @@ def prepare_header_footer(soup):
 					"layout_direction": "rtl" if is_rtl() else "ltr",
 				},
 			)
+
+			if html_id == "footer-html":
+				html = html.replace("padding: 15mm 0 5mm !important;", "padding: 0 !important;")
 
 			# create temp file
 			fname = os.path.join("/tmp", f"frappe-pdf-{frappe.generate_hash()}.html")
