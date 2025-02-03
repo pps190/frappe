@@ -255,7 +255,7 @@ def set_name_by_naming_series(doc):
 	if not doc.naming_series:
 		frappe.throw(frappe._("Naming Series mandatory"))
 
-	doc.name = make_autoname(doc.naming_series + ".#####", "", doc)
+	doc.name = make_autoname(doc.naming_series + ".###", "", doc)
 
 
 def make_autoname(key="", doctype="", doc="", *, ignore_validate=False):
