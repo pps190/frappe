@@ -393,6 +393,8 @@ def get_letter_head(doc, no_letterhead, letterhead=None):
 	if doc.get("letter_head"):
 		return frappe.db.get_value("Letter Head", doc.letter_head, ["content", "footer"], as_dict=True)
 	else:
+		if hasattr(doc, "company") and (comp_letter_header := frappe.get_value("Company", doc.company, "default_letter_head")):
+			return frappe.db.get_value("Letter Head", comp_letter_header, ["content", "footer"], as_dict=True)
 		return (
 			frappe.db.get_value("Letter Head", {"is_default": 1}, ["content", "footer"], as_dict=True) or {}
 		)
