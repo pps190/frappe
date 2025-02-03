@@ -464,7 +464,7 @@ def add_total_row(result, columns, meta=None, is_tree=False, parent_field=None, 
 				continue
 			cell = row.get(fieldname) if isinstance(row, dict) else row[i]
 			if fieldtype in ["Currency", "Int", "Float", "Percent", "Duration"] and flt(cell):
-				if not (is_tree and row.get(parent_field)):
+				if not (is_tree and row.get(parent_field)) and (report_name == "Gross Profit" and row.get(parent_field) != "parent_invoice" and "indent" not in row or row.get("indent") == 0.0):
 					total_row[i] = flt(total_row[i]) + flt(cell)
 
 			if fieldtype == "Percent" and i not in has_percent:
@@ -479,9 +479,11 @@ def add_total_row(result, columns, meta=None, is_tree=False, parent_field=None, 
 			total_row[i] = result[0].get(fieldname) if isinstance(result[0], dict) else result[0][i]
 
 	for i in has_percent:
-		if report_name and report_name == "Gross Profit" and i == 14:
+		if report_name and report_name == "Gross Profit" and columns[i]["fieldname"] == "gross_profit_%":
 			try:
-				total_row[i] = flt(total_row[13]) / flt(total_row[11])
+				gross_profit_idx = [index for index, df in enumerate(columns) if df["fieldname"] == "gross_profit"][0]
+				selling_amount_idx = [index for index, df in enumerate(columns) if df["fieldname"] == "selling_amount"][0]
+				total_row[i] = flt(total_row[gross_profit_idx]) / flt(total_row[selling_amount_idx])
 			except ZeroDivisionError:
 				total_row[i] = 0.0
 		else:
