@@ -44,7 +44,7 @@ export default {
 	name: "ImageCropper",
 	props: ["file", "fixed_aspect_ratio"],
 	data() {
-		let aspect_ratio = this.fixed_aspect_ratio != null ? this.fixed_aspect_ratio : NaN;
+		let aspect_ratio = NaN;
 		return {
 			src: null,
 			cropper: null,
