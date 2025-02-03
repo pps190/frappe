@@ -702,7 +702,7 @@ def get_all_roles(arg=None):
 @frappe.whitelist()
 def get_roles(arg=None):
 	"""get roles for a user"""
-	return frappe.get_roles(frappe.form_dict["uid"])
+	return frappe.get_roles(frappe.form_dict.get("uid", frappe.session.user))
 
 
 @frappe.whitelist()
@@ -1092,7 +1092,7 @@ def handle_password_test_fail(feedback: dict):
 	suggestions = feedback.get("suggestions", [])
 	warning = feedback.get("warning", "")
 
-	frappe.throw(msg=" ".join([warning] + suggestions), title=_("Invalid Password"))
+	# frappe.throw(msg=" ".join([warning] + suggestions), title=_("Invalid Password"))
 
 
 def update_gravatar(name):
