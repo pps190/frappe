@@ -135,7 +135,6 @@ class ScheduledJobType(Document):
 
 @frappe.whitelist()
 def execute_event(doc: str):
-	frappe.only_for("System Manager")
 	doc = json.loads(doc)
 	frappe.get_doc("Scheduled Job Type", doc.get("name")).enqueue(force=True)
 	return doc
