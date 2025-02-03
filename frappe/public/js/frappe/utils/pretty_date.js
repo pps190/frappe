@@ -9,6 +9,8 @@ function prettyDate(date, mini) {
 				.replace(/[TZ]/g, " ")
 				.replace(/\.[0-9]*/, "")
 		);
+
+		return date.toLocaleString("en-CA");
 	}
 
 	let diff = (new Date(frappe.datetime.now_datetime()).getTime() - date.getTime()) / 1000;
