@@ -116,7 +116,7 @@ def generate_report_result(
 		result = get_filtered_data(report.ref_doctype, columns, result, user)
 
 	if cint(report.add_total_row) and result and not skip_total_row:
-		result = add_total_row(result, columns, is_tree=is_tree, parent_field=parent_field)
+		result = add_total_row(result, columns, is_tree=is_tree, parent_field=parent_field, report_name=report.report_name)
 
 	return {
 		"result": result,
@@ -432,7 +432,7 @@ def build_xlsx_data(data, visible_idx, include_indentation, ignore_visible_idx=F
 	return result, column_widths
 
 
-def add_total_row(result, columns, meta=None, is_tree=False, parent_field=None):
+def add_total_row(result, columns, meta=None, is_tree=False, parent_field=None, report_name=None):
 	total_row = [""] * len(columns)
 	has_percent = []
 
@@ -479,7 +479,13 @@ def add_total_row(result, columns, meta=None, is_tree=False, parent_field=None):
 			total_row[i] = result[0].get(fieldname) if isinstance(result[0], dict) else result[0][i]
 
 	for i in has_percent:
-		total_row[i] = flt(total_row[i]) / len(result)
+		if report_name and report_name == "Gross Profit" and i == 14:
+			try:
+				total_row[i] = flt(total_row[13]) / flt(total_row[11])
+			except ZeroDivisionError:
+				total_row[i] = 0.0
+		else:
+			total_row[i] = flt(total_row[i]) / len(result)
 
 	first_col_fieldtype = None
 	if isinstance(columns[0], str):
