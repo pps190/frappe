@@ -483,7 +483,7 @@ def add_total_row(result, columns, meta=None, is_tree=False, parent_field=None, 
 			try:
 				gross_profit_idx = [index for index, df in enumerate(columns) if df["fieldname"] == "gross_profit"][0]
 				selling_amount_idx = [index for index, df in enumerate(columns) if df["fieldname"] == "selling_amount"][0]
-				total_row[i] = flt(total_row[gross_profit_idx]) / flt(total_row[selling_amount_idx])
+				total_row[i] = (flt(total_row[gross_profit_idx]) / flt(total_row[selling_amount_idx])) * 100
 			except ZeroDivisionError:
 				total_row[i] = 0.0
 		else:
