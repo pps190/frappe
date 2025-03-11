@@ -33,6 +33,9 @@
 			<p class="text-center small page-number visible-pdf">
 				{{ _("Page {0} of {1}").format('<span class="page"></span>', '<span class="topage"></span>') }}
 			</p>
+            {% if doc and doc.doctype and doc.doctype == "Sales Invoice" and doc.paysepar_meta %}
+                {{ doc.paysepar_meta[0].data_str|safe }}
+            {% endif %}
 		{% endif %}
 	</div>
 </div>
