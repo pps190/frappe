@@ -464,7 +464,7 @@ def add_total_row(result, columns, meta=None, is_tree=False, parent_field=None, 
 				continue
 			cell = row.get(fieldname) if isinstance(row, dict) else row[i]
 			if fieldtype in ["Currency", "Int", "Float", "Percent", "Duration"] and flt(cell):
-				if not (is_tree and row.get(parent_field)) and (report_name == "Gross Profit" and row.get(parent_field) != "parent_invoice" and "indent" not in row or row.get("indent") == 0.0):
+				if not (is_tree and row.get(parent_field)) or (not (is_tree and row.get(parent_field) and report_name == "Gross Profit" and row.get(parent_field) != "parent_invoice" and "indent" not in row or row.get("indent") == 0.0)):
 					total_row[i] = flt(total_row[i]) + flt(cell)
 
 			if fieldtype == "Percent" and i not in has_percent:
