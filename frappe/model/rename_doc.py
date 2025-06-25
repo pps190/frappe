@@ -399,6 +399,8 @@ def rename_doctype(doctype: str, old: str, new: str) -> None:
 def update_child_docs(old: str, new: str, meta: "Meta") -> None:
 	# update "parent"
 	for df in meta.get_table_fields():
+		if frappe.get_meta(df.options).is_virtual:
+			continue
 		(
 			frappe.qb.update(df.options)
 			.set("parent", new)
