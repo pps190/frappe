@@ -699,7 +699,7 @@ class BaseDocument:
 
 		def has_content(df):
 			value = cstr(self.get(df.fieldname))
-			has_text_content = strip_html(value).strip()
+			has_text_content = strip_html(value).strip() if df.fieldname != "direction" else value
 			has_img_tag = "<img" in value
 			has_text_or_img_tag = has_text_content or has_img_tag
 
