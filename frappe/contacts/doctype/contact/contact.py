@@ -169,9 +169,12 @@ def invite_user(contact):
 				"last_name": contact.last_name,
 				"email": contact.email_id,
 				"user_type": "Website User",
-				"send_welcome_email": 1,
+				"send_welcome_email": 0,
 			}
 		).insert(ignore_permissions=True)
+
+		user.reset_password(send_email=True)
+
 
 		return user.name
 
