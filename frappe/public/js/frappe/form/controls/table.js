@@ -44,7 +44,10 @@ frappe.ui.form.ControlTable = class ControlTable extends frappe.ui.form.Control 
 				data.shift();
 			} else {
 				// no column header, map to the existing visible columns
-				const visible_columns = grid_rows[0].get_visible_columns();
+				// Use grid.visible_columns which respects user settings
+				// visible_columns is array of [df, colsize] tuples
+				const visible_columns = grid.visible_columns ? grid.visible_columns.map(vc => vc[0]) : grid_rows[0].get_visible_columns();
+
 				let target_column_matched = false;
 				visible_columns.forEach((column) => {
 					// consider all columns after the target column.
