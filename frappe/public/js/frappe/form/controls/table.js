@@ -31,6 +31,8 @@ frappe.ui.form.ControlTable = class ControlTable extends frappe.ui.form.Control 
 
 			let data = frappe.utils.csv_to_array(pasted_data, "\t");
 
+			data = data.filter(row => row.filter(Boolean).length);
+
 			if (data.length === 1 && data[0].length === 1) return;
 
 			let fieldnames = [];
