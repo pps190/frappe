@@ -200,6 +200,11 @@ data-fieldname="{{ df.fieldname }}" data-fieldtype="{{ df.fieldtype }}"
 			<small class="sub-heading">{{ _(doc.sub_heading) if doc.sub_heading != None
 				else doc.name }}</small>
 		</h2>
+		{% if doc.doctype in ["Sales Invoice", "Purchase Invoice"] %}
+		<div style="margin-top: 5px;">
+			Ref: {{ (frappe.call('next.overrides.sales_invoice.get_gl_transaction_nos', voucher_type=doc.doctype, voucher_no=doc.name) or '')|replace('<br>', ', ') }}
+		</div>
+		{% endif %}
 	</div>
 	{% endif %}
 	{%- if doc.meta.is_submittable and doc.docstatus==0 and (print_settings==None or print_settings.add_draft_heading) -%}
