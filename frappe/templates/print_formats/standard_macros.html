@@ -202,7 +202,7 @@ data-fieldname="{{ df.fieldname }}" data-fieldtype="{{ df.fieldtype }}"
 		</h2>
 		{% if doc.doctype in ["Sales Invoice", "Purchase Invoice"] %}
 		<div style="margin-top: 5px;">
-			Ref: {{ (frappe.call('next.overrides.sales_invoice.get_gl_transaction_nos', voucher_type=doc.doctype, voucher_no=doc.name) or '')|replace('<br>', ', ') }}
+			Ref: {{ (frappe.call('next.overrides.sales_invoice.get_gl_transaction_nos', voucher_type=doc.doctype, voucher_no=doc.name) or '')|replace('<br>', ' ') }}
 		</div>
 		{% endif %}
 	</div>
