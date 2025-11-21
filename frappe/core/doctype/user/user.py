@@ -775,7 +775,7 @@ def test_password_strength(new_password, key=None, old_password=None, user_data=
 	minimum_password_score = cint(password_policy.get("minimum_password_score", 0))
 
 	if not enable_password_policy:
-		return {}
+		return {"feedback": {"password_policy_validation_passed": True}}
 
 	if not user_data:
 		user_data = frappe.db.get_value(
