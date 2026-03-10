@@ -20,37 +20,116 @@ PDF_CONTENT_ERRORS = [
 	"ContentOperationNotPermittedError",
 	"UnknownContentError",
 	"RemoteHostClosedError",
+	"ConnectionRefusedError",
 ]
 
 
+def convert_urls_to_local_paths(html: str) -> str:
+	"""
+	Convert HTTP URLs and relative paths pointing to local assets to file:// paths.
+	This prevents wkhtmltopdf from making network requests that may fail.
+	"""
+	# Get the site URL and sites path
+	from frappe.utils import get_url
+	site_url = get_url()
+	if site_url.endswith("/"):
+		site_url = site_url[:-1]
+
+	sites_path = frappe.local.sites_path
+
+	# Replace URLs like http://localhost:8000/assets/... or /assets/... with file paths
+	def replace_url(match):
+		full_match = match.group(0)
+		url = match.group(1)
+
+		# Skip data: URLs, mailto:, tel:, javascript:, #anchors
+		if url.startswith(("data:", "mailto:", "tel:", "javascript:", "#")):
+			return full_match
+
+		path = None
+
+		# Handle full URLs pointing to our site
+		if url.startswith(site_url):
+			path = url[len(site_url):]
+		# Handle relative URLs starting with /
+		elif url.startswith("/") and not url.startswith("//"):
+			path = url
+
+		if path and path.startswith("/"):
+			# Convert to local file path
+			# /files/... maps to {sites_path}/{site}/public/files/...
+			# /assets/... maps to {sites_path}/assets/...
+			if path.startswith("/files/") or path.startswith("/private/files/"):
+				local_path = os.path.join(sites_path, frappe.local.site, "public" if path.startswith("/files/") else "", path.lstrip("/"))
+			else:
+				local_path = os.path.join(sites_path, path.lstrip("/"))
+			local_path = os.path.abspath(local_path)
+			if os.path.exists(local_path):
+				return full_match.replace(url, f"file://{local_path}")
+
+		return full_match
+
+	# Match src="...", href="...", url('...'), url("...")
+	patterns = [
+		r'src=["\']([^"\']+)["\']',
+		r'href=["\']([^"\']+)["\']',
+		r"url\(['\"]?([^)\"']+)['\"]?\)",
+	]
+
+	for pattern in patterns:
+		html = re.sub(pattern, replace_url, html)
+
+	return html
+
+
 def get_pdf(html, options=None, output: PdfWriter | None = None):
-	html = scrub_urls(html)
+	# Remove action-banner (Print/Get PDF links) that should be hidden in PDF
+	html = re.sub(r'<div class="action-banner[^"]*"[^>]*>.*?</div>', '', html, flags=re.DOTALL)
+
+	# Convert URLs to local file paths for wkhtmltopdf to avoid network requests
+	html = convert_urls_to_local_paths(html)
 	html, options = prepare_options(html, options)
 
-	options.update({"disable-javascript": "", "disable-local-file-access": ""})
+	options.update({
+		"disable-javascript": "",
+		"enable-local-file-access": "",  # Allow file:// URLs for local assets
+		"disable-external-links": "",
+		"no-stop-slow-scripts": "",
+	})
 
 	filedata = ""
 	if LooseVersion(get_wkhtmltopdf_version()) > LooseVersion("0.12.3"):
 		options.update({"disable-smart-shrinking": ""})
 
+	# Use a temporary file to capture PDF output even if wkhtmltopdf reports errors
+	temp_pdf_path = f"/tmp/frappe-pdf-{frappe.generate_hash()}.pdf"
+
 	try:
-		# Set filename property to false, so no file is actually created
-		filedata = pdfkit.from_string(html, options=options or {}, verbose=True)
-
-		# create in-memory binary streams from filedata and create a PdfReader object
-		reader = PdfReader(io.BytesIO(filedata))
+		# Write to temp file instead of returning bytes directly
+		# This allows us to get partial output even if there are errors
+		pdfkit.from_string(html, temp_pdf_path, options=options or {}, verbose=True)
 	except OSError as e:
-		if any([error in str(e) for error in PDF_CONTENT_ERRORS]):
-			if not filedata:
-				print(html, options)
+		# Check if PDF was created despite the error
+		if not os.path.exists(temp_pdf_path) or os.path.getsize(temp_pdf_path) == 0:
+			if any([error in str(e) for error in PDF_CONTENT_ERRORS]):
+				frappe.log_error(f"PDF generation warning: {str(e)}", "PDF Content Error")
+				# Re-raise only if no file was created
 				frappe.throw(_("PDF generation failed because of broken image links"))
+			else:
+				raise
 
-			# allow pdfs with missing images if file got created
-			if output:
-				output.append_pages_from_reader(reader)
+	try:
+		# Read the generated PDF file
+		if os.path.exists(temp_pdf_path) and os.path.getsize(temp_pdf_path) > 0:
+			with open(temp_pdf_path, "rb") as f:
+				filedata = f.read()
+			reader = PdfReader(io.BytesIO(filedata))
 		else:
-			raise
+			frappe.throw(_("PDF generation failed - no output file created"))
 	finally:
+		# Clean up temp PDF file
+		if os.path.exists(temp_pdf_path):
+			os.remove(temp_pdf_path)
 		cleanup(options)
 
 	if "password" in options:
@@ -96,7 +175,8 @@ def prepare_options(html, options):
 			"quiet": None,
 			# 'no-outline': None,
 			"encoding": "UTF-8",
-			# 'load-error-handling': 'ignore'
+			"load-error-handling": "ignore",
+			"load-media-error-handling": "ignore",
 		}
 	)
 
