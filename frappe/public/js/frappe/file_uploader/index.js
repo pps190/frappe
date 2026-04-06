@@ -19,8 +19,11 @@ export default class FileUploader {
 		attach_doc_image,
 		frm,
 		make_attachments_public,
+		show_remove_bg,
+		remove_bg_default,
 	} = {}) {
 		frm && frm.attachments.max_reached(true);
+		this.show_remove_bg = show_remove_bg;
 
 		if (!wrapper) {
 			this.make_dialog(dialog_title);
@@ -47,6 +50,8 @@ export default class FileUploader {
 						disable_file_browser,
 						attach_doc_image,
 						make_attachments_public,
+						show_remove_bg,
+						remove_bg_default,
 					},
 				}),
 		});
@@ -95,6 +100,13 @@ export default class FileUploader {
 		if (files && files.length) {
 			this.uploader.add_files(files);
 		}
+
+		// Sync footer toggle when cropper changes remove_bg state
+		if (this.show_remove_bg) {
+			this.uploader.$watch("remove_bg_checked", () => {
+				this.update_remove_bg_toggle();
+			});
+		}
 	}
 
 	upload_files() {
@@ -123,5 +135,39 @@ export default class FileUploader {
 			$(this).data("bs.modal", null);
 			$(this).remove();
 		});
+
+		if (this.show_remove_bg) {
+			this.add_remove_bg_toggle();
+		}
+	}
+
+	add_remove_bg_toggle() {
+		const $toggle = $(`
+			<div class="remove-bg-footer-toggle">
+				<div class="remove-bg-pill active">
+					<span class="remove-bg-label">${__("Remove Background")}</span>
+					<span class="remove-bg-switch">
+						<span class="remove-bg-track on">
+							<span class="remove-bg-thumb"></span>
+						</span>
+					</span>
+				</div>
+			</div>
+		`);
+
+		this.dialog.footer.prepend($toggle);
+		this.$remove_bg_toggle = $toggle;
+
+		$toggle.on("click", () => {
+			this.uploader.remove_bg_checked = !this.uploader.remove_bg_checked;
+			this.update_remove_bg_toggle();
+		});
+	}
+
+	update_remove_bg_toggle() {
+		if (!this.$remove_bg_toggle) return;
+		const active = this.uploader.remove_bg_checked;
+		this.$remove_bg_toggle.find(".remove-bg-pill").toggleClass("active", active);
+		this.$remove_bg_toggle.find(".remove-bg-track").toggleClass("on", active);
 	}
 }
