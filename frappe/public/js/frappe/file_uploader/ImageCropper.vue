@@ -45,60 +45,132 @@
 		<!-- Watermark control panel (collapsible) -->
 		<transition name="wm-panel">
 			<div v-if="wm_enabled && wm_loaded" class="wm-controls-panel">
-				<div class="wm-controls-grid">
-					<div class="wm-control-field">
-						<label class="wm-control-label">{{ __("Position X") }}</label>
-						<div class="wm-input-group">
-							<input type="number" class="wm-input"
-								:value="Math.round(wm_pos_x * 10) / 10"
-								min="0" max="100" step="0.5"
-								@input="wm_set_pos_x(parseFloat($event.target.value))"
-							/>
-							<span class="wm-input-suffix">%</span>
+				<!-- Mode selector -->
+				<div class="wm-mode-selector">
+					<button class="wm-mode-btn" :class="{ active: wm_mode === 'Corner' }" @click="wm_set_mode('Corner')">
+						{{ __("Corner") }}
+					</button>
+					<button class="wm-mode-btn" :class="{ active: wm_mode === 'Tiled' }" @click="wm_set_mode('Tiled')">
+						{{ __("Tiled") }}
+					</button>
+				</div>
+
+				<!-- Corner mode controls -->
+				<template v-if="wm_mode === 'Corner'">
+					<div class="wm-controls-grid">
+						<div class="wm-control-field">
+							<label class="wm-control-label">{{ __("Position X") }}</label>
+							<div class="wm-input-group">
+								<input type="number" class="wm-input"
+									:value="Math.round(wm_pos_x * 10) / 10"
+									min="0" max="100" step="0.5"
+									@input="wm_set_pos_x(parseFloat($event.target.value))"
+								/>
+								<span class="wm-input-suffix">%</span>
+							</div>
+						</div>
+						<div class="wm-control-field">
+							<label class="wm-control-label">{{ __("Position Y") }}</label>
+							<div class="wm-input-group">
+								<input type="number" class="wm-input"
+									:value="Math.round(wm_pos_y * 10) / 10"
+									min="0" max="100" step="0.5"
+									@input="wm_set_pos_y(parseFloat($event.target.value))"
+								/>
+								<span class="wm-input-suffix">%</span>
+							</div>
+						</div>
+						<div class="wm-control-field">
+							<label class="wm-control-label">{{ __("Size") }}</label>
+							<div class="wm-input-group">
+								<input type="number" class="wm-input"
+									:value="Math.round(wm_size * 10) / 10"
+									min="5" max="100" step="1"
+									@input="wm_set_size(parseFloat($event.target.value))"
+								/>
+								<span class="wm-input-suffix">%</span>
+							</div>
+						</div>
+						<div class="wm-control-field">
+							<label class="wm-control-label">{{ __("Opacity") }}</label>
+							<div class="wm-input-group">
+								<input type="number" class="wm-input"
+									:value="wm_opacity"
+									min="5" max="100" step="1"
+									@input="wm_set_opacity(parseInt($event.target.value))"
+								/>
+								<span class="wm-input-suffix">%</span>
+							</div>
 						</div>
 					</div>
-					<div class="wm-control-field">
-						<label class="wm-control-label">{{ __("Position Y") }}</label>
-						<div class="wm-input-group">
-							<input type="number" class="wm-input"
-								:value="Math.round(wm_pos_y * 10) / 10"
-								min="0" max="100" step="0.5"
-								@input="wm_set_pos_y(parseFloat($event.target.value))"
-							/>
-							<span class="wm-input-suffix">%</span>
-						</div>
-					</div>
-					<div class="wm-control-field">
-						<label class="wm-control-label">{{ __("Size") }}</label>
-						<div class="wm-input-group">
-							<input type="number" class="wm-input"
-								:value="Math.round(wm_size * 10) / 10"
-								min="5" max="100" step="1"
-								@input="wm_set_size(parseFloat($event.target.value))"
-							/>
-							<span class="wm-input-suffix">%</span>
-						</div>
-					</div>
-					<div class="wm-control-field">
+					<div class="wm-opacity-row">
 						<label class="wm-control-label">{{ __("Opacity") }}</label>
-						<div class="wm-input-group">
-							<input type="number" class="wm-input"
-								:value="wm_opacity"
-								min="5" max="100" step="1"
-								@input="wm_set_opacity(parseInt($event.target.value))"
-							/>
-							<span class="wm-input-suffix">%</span>
+						<input type="range" class="wm-slider" min="5" max="100"
+							:value="wm_opacity"
+							@input="wm_set_opacity(parseInt($event.target.value))"
+						/>
+						<span class="wm-slider-value">{{ wm_opacity }}%</span>
+					</div>
+				</template>
+
+				<!-- Tiled mode controls -->
+				<template v-if="wm_mode === 'Tiled'">
+					<div class="wm-controls-grid">
+						<div class="wm-control-field">
+							<label class="wm-control-label">{{ __("Tile Size") }}</label>
+							<div class="wm-input-group">
+								<input type="number" class="wm-input"
+									:value="Math.round(wm_tile_size)"
+									min="5" max="50" step="1"
+									@input="wm_set_tile_size(parseInt($event.target.value))"
+								/>
+								<span class="wm-input-suffix">%</span>
+							</div>
+						</div>
+						<div class="wm-control-field">
+							<label class="wm-control-label">{{ __("Opacity") }}</label>
+							<div class="wm-input-group">
+								<input type="number" class="wm-input"
+									:value="wm_tile_opacity"
+									min="5" max="100" step="1"
+									@input="wm_set_tile_opacity(parseInt($event.target.value))"
+								/>
+								<span class="wm-input-suffix">%</span>
+							</div>
+						</div>
+						<div class="wm-control-field">
+							<label class="wm-control-label">{{ __("Rotation") }}</label>
+							<div class="wm-input-group">
+								<input type="number" class="wm-input"
+									:value="wm_tile_rotation"
+									min="-60" max="0" step="1"
+									@input="wm_set_tile_rotation(parseInt($event.target.value))"
+								/>
+								<span class="wm-input-suffix">°</span>
+							</div>
+						</div>
+						<div class="wm-control-field">
+							<label class="wm-control-label">{{ __("Spacing") }}</label>
+							<div class="wm-input-group">
+								<input type="number" class="wm-input"
+									:value="wm_tile_spacing"
+									min="10" max="80" step="1"
+									@input="wm_set_tile_spacing(parseInt($event.target.value))"
+								/>
+								<span class="wm-input-suffix">%</span>
+							</div>
 						</div>
 					</div>
-				</div>
-				<div class="wm-opacity-row">
-					<label class="wm-control-label">{{ __("Opacity") }}</label>
-					<input type="range" class="wm-slider" min="5" max="100"
-						:value="wm_opacity"
-						@input="wm_set_opacity(parseInt($event.target.value))"
-					/>
-					<span class="wm-slider-value">{{ wm_opacity }}%</span>
-				</div>
+					<div class="wm-opacity-row">
+						<label class="wm-control-label">{{ __("Opacity") }}</label>
+						<input type="range" class="wm-slider" min="5" max="100"
+							:value="wm_tile_opacity"
+							@input="wm_set_tile_opacity(parseInt($event.target.value))"
+						/>
+						<span class="wm-slider-value">{{ wm_tile_opacity }}%</span>
+					</div>
+				</template>
+
 				<div class="wm-panel-actions">
 					<button class="btn btn-xs btn-default" @click="wm_reset_defaults">
 						{{ __("Reset") }}
@@ -202,6 +274,12 @@ export default {
 			wm_dragging: false,
 			wm_drag_offset_x: 0,
 			wm_drag_offset_y: 0,
+			wm_mode: "Corner",
+			// Tiled mode params
+			wm_tile_size: 15,
+			wm_tile_opacity: 20,
+			wm_tile_rotation: -30,
+			wm_tile_spacing: 40,
 			// Interaction mode
 			interaction_mode: "crop",
 		};
@@ -232,10 +310,17 @@ export default {
 		// Watermark: load settings
 		if (this.show_watermark && this.watermark_settings) {
 			this.wm_enabled = this.wm_default_enabled;
+			this.wm_mode = this.watermark_settings.mode || "Corner";
+			// Corner params
 			this.wm_pos_x = this.watermark_settings.position_x || 80;
 			this.wm_pos_y = this.watermark_settings.position_y || 90;
 			this.wm_size = this.watermark_settings.size || 20;
 			this.wm_opacity = this.watermark_settings.opacity || 50;
+			// Tiled params
+			this.wm_tile_size = this.watermark_settings.tile_size || 15;
+			this.wm_tile_opacity = this.watermark_settings.tile_opacity || 20;
+			this.wm_tile_rotation = this.watermark_settings.tile_rotation != null ? this.watermark_settings.tile_rotation : -30;
+			this.wm_tile_spacing = this.watermark_settings.tile_spacing || 40;
 			this.load_watermark_image(this.watermark_settings.watermark_image);
 		}
 
@@ -313,37 +398,50 @@ export default {
 				const ctx = canvas.getContext("2d");
 				const cw = canvas.width;
 				const ch = canvas.height;
-
-				// Watermark position is relative to the full image.
-				// Convert to cropped canvas coordinates.
 				const full_w = image_data.naturalWidth;
 				const full_h = image_data.naturalHeight;
-
-				// Watermark center in full image pixel space
-				const wm_center_x = (this.wm_pos_x / 100) * full_w;
-				const wm_center_y = (this.wm_pos_y / 100) * full_h;
-				const wm_w_full = (this.wm_size / 100) * full_w;
-				const wm_h_full = wm_w_full * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
-
-				// Crop box in full image pixel space
 				const crop_x = crop_data.x;
 				const crop_y = crop_data.y;
 				const crop_w = crop_data.width;
 				const crop_h = crop_data.height;
-
-				// Scale from crop pixel space to output canvas
 				const scale_x = cw / crop_w;
 				const scale_y = ch / crop_h;
 
-				// Watermark position in cropped canvas
-				const draw_x = (wm_center_x - wm_w_full / 2 - crop_x) * scale_x;
-				const draw_y = (wm_center_y - wm_h_full / 2 - crop_y) * scale_y;
-				const draw_w = wm_w_full * scale_x;
-				const draw_h = wm_h_full * scale_y;
+				if (this.wm_mode === "Tiled") {
+					// Tiled watermark on cropped canvas
+					const tile_w = (this.wm_tile_size / 100) * full_w * scale_x;
+					const tile_h = tile_w * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
+					const spacing_x = (this.wm_tile_spacing / 100) * full_w * scale_x;
+					const spacing_y = (this.wm_tile_spacing / 100) * full_h * scale_y;
+					const step_x = tile_w + spacing_x;
+					const step_y = tile_h + spacing_y;
+					const angle = (this.wm_tile_rotation * Math.PI) / 180;
 
-				ctx.globalAlpha = this.wm_opacity / 100;
-				ctx.drawImage(this.wm_img, draw_x, draw_y, draw_w, draw_h);
-				ctx.globalAlpha = 1.0;
+					ctx.save();
+					ctx.globalAlpha = this.wm_tile_opacity / 100;
+					ctx.translate(cw / 2, ch / 2);
+					ctx.rotate(angle);
+					const diag = Math.sqrt(cw * cw + ch * ch);
+					for (let y = -diag; y < diag; y += step_y) {
+						for (let x = -diag; x < diag; x += step_x) {
+							ctx.drawImage(this.wm_img, x, y, tile_w, tile_h);
+						}
+					}
+					ctx.restore();
+				} else {
+					// Corner watermark
+					const wm_center_x = (this.wm_pos_x / 100) * full_w;
+					const wm_center_y = (this.wm_pos_y / 100) * full_h;
+					const wm_w_full = (this.wm_size / 100) * full_w;
+					const wm_h_full = wm_w_full * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
+					const draw_x = (wm_center_x - wm_w_full / 2 - crop_x) * scale_x;
+					const draw_y = (wm_center_y - wm_h_full / 2 - crop_y) * scale_y;
+					const draw_w = wm_w_full * scale_x;
+					const draw_h = wm_h_full * scale_y;
+					ctx.globalAlpha = this.wm_opacity / 100;
+					ctx.drawImage(this.wm_img, draw_x, draw_y, draw_w, draw_h);
+					ctx.globalAlpha = 1.0;
+				}
 			}
 
 			const file_type = (this.bg_removed || this.wm_enabled) ? "image/png" : this.file.file_obj.type;
@@ -465,10 +563,16 @@ export default {
 			const ch = canvas.height;
 			ctx.clearRect(0, 0, cw, ch);
 
-			// Get the image display area within the cropper container
 			const cd = this.cropper.getCanvasData();
-			const r = this.wm_get_rect_in_container(cd);
 
+			if (this.wm_mode === "Tiled") {
+				this.wm_draw_tiled(ctx, cd);
+			} else {
+				this.wm_draw_corner(ctx, cd);
+			}
+		},
+		wm_draw_corner(ctx, cd) {
+			const r = this.wm_get_rect_in_container(cd);
 			ctx.globalAlpha = this.wm_opacity / 100;
 			ctx.drawImage(this.wm_img, r.x, r.y, r.w, r.h);
 			ctx.globalAlpha = 1.0;
@@ -478,6 +582,31 @@ export default {
 			ctx.setLineDash([4, 4]);
 			ctx.strokeRect(r.x, r.y, r.w, r.h);
 			ctx.setLineDash([]);
+		},
+		wm_draw_tiled(ctx, cd) {
+			const tile_w = (this.wm_tile_size / 100) * cd.width;
+			const tile_h = tile_w * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
+			const spacing_x = (this.wm_tile_spacing / 100) * cd.width;
+			const spacing_y = (this.wm_tile_spacing / 100) * cd.height;
+			const step_x = tile_w + spacing_x;
+			const step_y = tile_h + spacing_y;
+			const angle = (this.wm_tile_rotation * Math.PI) / 180;
+
+			ctx.save();
+			ctx.globalAlpha = this.wm_tile_opacity / 100;
+			// Rotate around image center
+			const cx = cd.left + cd.width / 2;
+			const cy = cd.top + cd.height / 2;
+			ctx.translate(cx, cy);
+			ctx.rotate(angle);
+
+			const diag = Math.sqrt(cd.width * cd.width + cd.height * cd.height);
+			for (let y = -diag; y < diag; y += step_y) {
+				for (let x = -diag; x < diag; x += step_x) {
+					ctx.drawImage(this.wm_img, x, y, tile_w, tile_h);
+				}
+			}
+			ctx.restore();
 		},
 		// Watermark rect in container/canvas display coordinates
 		wm_get_rect_in_container(cd) {
@@ -600,6 +729,30 @@ export default {
 			this.wm_opacity = Math.max(5, Math.min(100, val));
 			this.wm_draw();
 		},
+		wm_set_mode(mode) {
+			this.wm_mode = mode;
+			this.wm_draw();
+		},
+		wm_set_tile_size(val) {
+			if (isNaN(val)) return;
+			this.wm_tile_size = Math.max(5, Math.min(50, val));
+			this.wm_draw();
+		},
+		wm_set_tile_opacity(val) {
+			if (isNaN(val)) return;
+			this.wm_tile_opacity = Math.max(5, Math.min(100, val));
+			this.wm_draw();
+		},
+		wm_set_tile_rotation(val) {
+			if (isNaN(val)) return;
+			this.wm_tile_rotation = Math.max(-60, Math.min(0, val));
+			this.wm_draw();
+		},
+		wm_set_tile_spacing(val) {
+			if (isNaN(val)) return;
+			this.wm_tile_spacing = Math.max(10, Math.min(80, val));
+			this.wm_draw();
+		},
 		async wm_save_defaults() {
 			try {
 				await frappe.call({
@@ -608,18 +761,30 @@ export default {
 						doctype: "Watermark Settings",
 						name: "Watermark Settings",
 						fieldname: {
+							mode: this.wm_mode,
 							position_x: Math.round(this.wm_pos_x * 10) / 10,
 							position_y: Math.round(this.wm_pos_y * 10) / 10,
 							size: Math.round(this.wm_size * 10) / 10,
 							opacity: this.wm_opacity,
+							tile_size: Math.round(this.wm_tile_size * 10) / 10,
+							tile_opacity: this.wm_tile_opacity,
+							tile_rotation: this.wm_tile_rotation,
+							tile_spacing: this.wm_tile_spacing,
 						},
 					},
 				});
 				if (frappe._watermark_settings_cache) {
-					frappe._watermark_settings_cache.position_x = this.wm_pos_x;
-					frappe._watermark_settings_cache.position_y = this.wm_pos_y;
-					frappe._watermark_settings_cache.size = this.wm_size;
-					frappe._watermark_settings_cache.opacity = this.wm_opacity;
+					Object.assign(frappe._watermark_settings_cache, {
+						mode: this.wm_mode,
+						position_x: this.wm_pos_x,
+						position_y: this.wm_pos_y,
+						size: this.wm_size,
+						opacity: this.wm_opacity,
+						tile_size: this.wm_tile_size,
+						tile_opacity: this.wm_tile_opacity,
+						tile_rotation: this.wm_tile_rotation,
+						tile_spacing: this.wm_tile_spacing,
+					});
 				}
 				frappe.show_alert({ message: __("Watermark defaults saved"), indicator: "green" });
 			} catch (e) {
@@ -628,10 +793,16 @@ export default {
 		},
 		wm_reset_defaults() {
 			if (this.watermark_settings) {
-				this.wm_pos_x = this.watermark_settings.position_x || 80;
-				this.wm_pos_y = this.watermark_settings.position_y || 90;
-				this.wm_size = this.watermark_settings.size || 20;
-				this.wm_opacity = this.watermark_settings.opacity || 50;
+				const s = this.watermark_settings;
+				this.wm_mode = s.mode || "Corner";
+				this.wm_pos_x = s.position_x || 80;
+				this.wm_pos_y = s.position_y || 90;
+				this.wm_size = s.size || 20;
+				this.wm_opacity = s.opacity || 50;
+				this.wm_tile_size = s.tile_size || 15;
+				this.wm_tile_opacity = s.tile_opacity || 20;
+				this.wm_tile_rotation = s.tile_rotation != null ? s.tile_rotation : -30;
+				this.wm_tile_spacing = s.tile_spacing || 40;
 				this.wm_draw();
 				frappe.show_alert({ message: __("Reset to defaults"), indicator: "blue" });
 			}
@@ -819,6 +990,37 @@ img {
 .wm-panel-leave {
 	max-height: 220px;
 	opacity: 1;
+}
+
+.wm-mode-selector {
+	display: flex;
+	margin-bottom: 8px;
+	background: var(--bg-color);
+	border-radius: 6px;
+	padding: 2px;
+	width: fit-content;
+	border: 1px solid var(--border-color);
+}
+
+.wm-mode-btn {
+	padding: 3px 14px;
+	border: none;
+	border-radius: 4px;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	background: transparent;
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.wm-mode-btn:hover {
+	color: var(--text-color);
+}
+
+.wm-mode-btn.active {
+	background: white;
+	color: var(--primary);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .wm-controls-panel {
