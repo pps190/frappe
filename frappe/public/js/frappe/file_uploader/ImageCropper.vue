@@ -1,8 +1,30 @@
 <template>
 	<div>
+		<!-- Mode switcher — visible whenever watermark feature is available -->
+		<div v-if="show_watermark && watermark_settings" class="mode-switcher">
+			<button
+				class="mode-btn"
+				:class="{ active: interaction_mode === 'crop' }"
+				@click="set_mode('crop')"
+			>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/></svg>
+				{{ __("Crop") }}
+			</button>
+			<button
+				class="mode-btn"
+				:class="{ active: interaction_mode === 'watermark', disabled: !wm_enabled || !wm_loaded }"
+				:disabled="!wm_enabled || !wm_loaded"
+				@click="set_mode('watermark')"
+			>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+				{{ __("Watermark") }}
+			</button>
+		</div>
+
 		<div
 			class="cropper-image-wrapper"
 			ref="wrapper"
+			:class="{ 'wm-mode': interaction_mode === 'watermark' }"
 			@mousedown="on_wrapper_mousedown"
 			@wheel.prevent="on_wrapper_wheel"
 			@touchstart="on_wrapper_touchstart"
@@ -12,6 +34,7 @@
 				v-if="wm_enabled && wm_loaded"
 				ref="wm_canvas"
 				class="watermark-overlay-canvas"
+				:style="{ pointerEvents: interaction_mode === 'watermark' ? 'auto' : 'none' }"
 			></canvas>
 			<div v-if="bg_processing" class="cropper-loading-overlay">
 				<div class="cropper-spinner"></div>
@@ -179,6 +202,8 @@ export default {
 			wm_dragging: false,
 			wm_drag_offset_x: 0,
 			wm_drag_offset_y: 0,
+			// Interaction mode
+			interaction_mode: "crop",
 		};
 	},
 	watch: {
@@ -279,19 +304,45 @@ export default {
 
 		// ── Crop ──
 		crop_image() {
-			this.file.crop_box_data = this.cropper.getData();
+			const crop_data = this.cropper.getData();
+			const image_data = this.cropper.getImageData();
+			this.file.crop_box_data = crop_data;
 			const canvas = this.cropper.getCroppedCanvas();
 
 			if (this.wm_enabled && this.wm_loaded && this.wm_img) {
 				const ctx = canvas.getContext("2d");
 				const cw = canvas.width;
 				const ch = canvas.height;
-				const wm_w = (this.wm_size / 100) * cw;
-				const wm_h = wm_w * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
-				const cx = (this.wm_pos_x / 100) * cw - wm_w / 2;
-				const cy = (this.wm_pos_y / 100) * ch - wm_h / 2;
+
+				// Watermark position is relative to the full image.
+				// Convert to cropped canvas coordinates.
+				const full_w = image_data.naturalWidth;
+				const full_h = image_data.naturalHeight;
+
+				// Watermark center in full image pixel space
+				const wm_center_x = (this.wm_pos_x / 100) * full_w;
+				const wm_center_y = (this.wm_pos_y / 100) * full_h;
+				const wm_w_full = (this.wm_size / 100) * full_w;
+				const wm_h_full = wm_w_full * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
+
+				// Crop box in full image pixel space
+				const crop_x = crop_data.x;
+				const crop_y = crop_data.y;
+				const crop_w = crop_data.width;
+				const crop_h = crop_data.height;
+
+				// Scale from crop pixel space to output canvas
+				const scale_x = cw / crop_w;
+				const scale_y = ch / crop_h;
+
+				// Watermark position in cropped canvas
+				const draw_x = (wm_center_x - wm_w_full / 2 - crop_x) * scale_x;
+				const draw_y = (wm_center_y - wm_h_full / 2 - crop_y) * scale_y;
+				const draw_w = wm_w_full * scale_x;
+				const draw_h = wm_h_full * scale_y;
+
 				ctx.globalAlpha = this.wm_opacity / 100;
-				ctx.drawImage(this.wm_img, cx, cy, wm_w, wm_h);
+				ctx.drawImage(this.wm_img, draw_x, draw_y, draw_w, draw_h);
 				ctx.globalAlpha = 1.0;
 			}
 
@@ -387,6 +438,9 @@ export default {
 			this.$emit("wm_enabled_changed", this.wm_enabled);
 			if (this.wm_enabled) {
 				this.$nextTick(() => this.wm_resize_canvas());
+			} else {
+				// Auto-switch to crop mode when watermark is turned off
+				this.set_mode("crop");
 			}
 		},
 		wm_resize_canvas() {
@@ -405,13 +459,16 @@ export default {
 		},
 		wm_draw() {
 			const canvas = this.$refs.wm_canvas;
-			if (!canvas || !this.wm_img) return;
+			if (!canvas || !this.wm_img || !this.cropper) return;
 			const ctx = canvas.getContext("2d");
 			const cw = canvas.width;
 			const ch = canvas.height;
 			ctx.clearRect(0, 0, cw, ch);
 
-			const r = this.wm_get_rect(cw, ch);
+			// Get the image display area within the cropper container
+			const cd = this.cropper.getCanvasData();
+			const r = this.wm_get_rect_in_container(cd);
+
 			ctx.globalAlpha = this.wm_opacity / 100;
 			ctx.drawImage(this.wm_img, r.x, r.y, r.w, r.h);
 			ctx.globalAlpha = 1.0;
@@ -422,83 +479,93 @@ export default {
 			ctx.strokeRect(r.x, r.y, r.w, r.h);
 			ctx.setLineDash([]);
 		},
-		wm_get_rect(cw, ch) {
-			const wm_w = (this.wm_size / 100) * cw;
+		// Watermark rect in container/canvas display coordinates
+		wm_get_rect_in_container(cd) {
+			// cd = cropper.getCanvasData() = { left, top, width, height } of image in container
+			const wm_w = (this.wm_size / 100) * cd.width;
 			const wm_h = wm_w * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
 			return {
-				x: (this.wm_pos_x / 100) * cw - wm_w / 2,
-				y: (this.wm_pos_y / 100) * ch - wm_h / 2,
+				x: cd.left + (this.wm_pos_x / 100) * cd.width - wm_w / 2,
+				y: cd.top + (this.wm_pos_y / 100) * cd.height - wm_h / 2,
 				w: wm_w, h: wm_h,
 			};
 		},
 		wm_hit_test(mx, my) {
-			const canvas = this.$refs.wm_canvas;
-			if (!canvas) return false;
-			const r = this.wm_get_rect(canvas.width, canvas.height);
+			if (!this.cropper) return false;
+			const cd = this.cropper.getCanvasData();
+			const r = this.wm_get_rect_in_container(cd);
 			return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
 		},
 
-		// Wrapper-level mouse/touch handlers — watermark drag doesn't block CropperJS
-		on_wrapper_mousedown(e) {
-			if (!this.wm_enabled || !this.wm_loaded) return;
-			const canvas = this.$refs.wm_canvas;
-			if (!canvas) return;
-			const rect = canvas.getBoundingClientRect();
-			const mx = e.clientX - rect.left;
-			const my = e.clientY - rect.top;
-			if (this.wm_hit_test(mx, my)) {
-				e.stopPropagation();
-				e.preventDefault();
-				this.wm_dragging = true;
-				this.wm_drag_offset_x = mx - (this.wm_pos_x / 100) * canvas.width;
-				this.wm_drag_offset_y = my - (this.wm_pos_y / 100) * canvas.height;
+		set_mode(mode) {
+			this.interaction_mode = mode;
+			if (this.cropper) {
+				// Disable/enable CropperJS drag based on mode
+				if (mode === "watermark") {
+					this.cropper.setDragMode("none");
+				} else {
+					this.cropper.setDragMode("crop");
+				}
 			}
 		},
-		on_wrapper_mousemove(e) {
-			if (!this.wm_dragging) return;
+
+		// Wrapper-level mouse/touch handlers — only active in watermark mode
+		on_wrapper_mousedown(e) {
+			if (this.interaction_mode !== "watermark") return;
+			if (!this.wm_enabled || !this.wm_loaded || !this.cropper) return;
 			const canvas = this.$refs.wm_canvas;
 			if (!canvas) return;
 			const rect = canvas.getBoundingClientRect();
 			const mx = e.clientX - rect.left;
 			const my = e.clientY - rect.top;
-			this.wm_pos_x = Math.max(0, Math.min(100, ((mx - this.wm_drag_offset_x) / canvas.width) * 100));
-			this.wm_pos_y = Math.max(0, Math.min(100, ((my - this.wm_drag_offset_y) / canvas.height) * 100));
+			const cd = this.cropper.getCanvasData();
+			e.stopPropagation();
+			e.preventDefault();
+			this.wm_dragging = true;
+			// Offset from watermark center in container coords
+			this.wm_drag_offset_x = mx - (cd.left + (this.wm_pos_x / 100) * cd.width);
+			this.wm_drag_offset_y = my - (cd.top + (this.wm_pos_y / 100) * cd.height);
+		},
+		on_wrapper_mousemove(e) {
+			if (!this.wm_dragging || !this.cropper) return;
+			const canvas = this.$refs.wm_canvas;
+			if (!canvas) return;
+			const rect = canvas.getBoundingClientRect();
+			const mx = e.clientX - rect.left;
+			const my = e.clientY - rect.top;
+			const cd = this.cropper.getCanvasData();
+			this.wm_pos_x = Math.max(0, Math.min(100, ((mx - this.wm_drag_offset_x - cd.left) / cd.width) * 100));
+			this.wm_pos_y = Math.max(0, Math.min(100, ((my - this.wm_drag_offset_y - cd.top) / cd.height) * 100));
 			this.wm_draw();
 		},
 		on_wrapper_mouseup() {
 			this.wm_dragging = false;
 		},
 		on_wrapper_wheel(e) {
+			if (this.interaction_mode !== "watermark") return;
 			if (!this.wm_enabled || !this.wm_loaded) return;
-			const canvas = this.$refs.wm_canvas;
-			if (!canvas) return;
-			const rect = canvas.getBoundingClientRect();
-			const mx = e.clientX - rect.left;
-			const my = e.clientY - rect.top;
-			if (this.wm_hit_test(mx, my)) {
-				const delta = e.deltaY > 0 ? -1 : 1;
-				this.wm_size = Math.max(5, Math.min(100, this.wm_size + delta));
-				this.wm_draw();
-			}
+			const delta = e.deltaY > 0 ? -1 : 1;
+			this.wm_size = Math.max(5, Math.min(100, this.wm_size + delta));
+			this.wm_draw();
 		},
 		on_wrapper_touchstart(e) {
-			if (!this.wm_enabled || !this.wm_loaded) return;
+			if (this.interaction_mode !== "watermark") return;
+			if (!this.wm_enabled || !this.wm_loaded || !this.cropper) return;
 			const canvas = this.$refs.wm_canvas;
 			if (!canvas) return;
 			const touch = e.touches[0];
 			const rect = canvas.getBoundingClientRect();
 			const mx = touch.clientX - rect.left;
 			const my = touch.clientY - rect.top;
-			if (this.wm_hit_test(mx, my)) {
-				e.stopPropagation();
-				e.preventDefault();
-				this.wm_dragging = true;
-				this.wm_drag_offset_x = mx - (this.wm_pos_x / 100) * canvas.width;
-				this.wm_drag_offset_y = my - (this.wm_pos_y / 100) * canvas.height;
-			}
+			const cd = this.cropper.getCanvasData();
+			e.stopPropagation();
+			e.preventDefault();
+			this.wm_dragging = true;
+			this.wm_drag_offset_x = mx - (cd.left + (this.wm_pos_x / 100) * cd.width);
+			this.wm_drag_offset_y = my - (cd.top + (this.wm_pos_y / 100) * cd.height);
 		},
 		on_wrapper_touchmove(e) {
-			if (!this.wm_dragging) return;
+			if (!this.wm_dragging || !this.cropper) return;
 			e.preventDefault();
 			const canvas = this.$refs.wm_canvas;
 			if (!canvas) return;
@@ -506,8 +573,9 @@ export default {
 			const rect = canvas.getBoundingClientRect();
 			const mx = touch.clientX - rect.left;
 			const my = touch.clientY - rect.top;
-			this.wm_pos_x = Math.max(0, Math.min(100, ((mx - this.wm_drag_offset_x) / canvas.width) * 100));
-			this.wm_pos_y = Math.max(0, Math.min(100, ((my - this.wm_drag_offset_y) / canvas.height) * 100));
+			const cd = this.cropper.getCanvasData();
+			this.wm_pos_x = Math.max(0, Math.min(100, ((mx - this.wm_drag_offset_x - cd.left) / cd.width) * 100));
+			this.wm_pos_y = Math.max(0, Math.min(100, ((my - this.wm_drag_offset_y - cd.top) / cd.height) * 100));
 			this.wm_draw();
 		},
 
@@ -579,8 +647,52 @@ img {
 	max-height: 600px;
 }
 
+/* ── Mode switcher ── */
+.mode-switcher {
+	display: flex;
+	margin-bottom: 8px;
+	background: var(--control-bg);
+	border-radius: 8px;
+	padding: 2px;
+	width: fit-content;
+}
+
+.mode-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 14px;
+	border: none;
+	border-radius: 6px;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	background: transparent;
+	cursor: pointer;
+	transition: all 0.15s ease;
+	white-space: nowrap;
+}
+
+.mode-btn:hover {
+	color: var(--text-color);
+}
+
+.mode-btn.active {
+	background: white;
+	color: var(--primary);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.mode-btn.disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
 .cropper-image-wrapper {
 	position: relative;
+}
+
+.cropper-image-wrapper.wm-mode {
+	cursor: move;
 }
 
 .watermark-overlay-canvas {
@@ -864,6 +976,17 @@ img {
 
 	.toggle-pill {
 		padding: 3px 8px;
+		font-size: 12px;
+	}
+
+	.mode-switcher {
+		width: 100%;
+	}
+
+	.mode-btn {
+		flex: 1;
+		justify-content: center;
+		padding: 4px 10px;
 		font-size: 12px;
 	}
 }
