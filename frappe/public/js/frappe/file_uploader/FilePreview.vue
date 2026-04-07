@@ -84,13 +84,21 @@ export default {
 		};
 	},
 	mounted() {
-		if (this.is_image) {
-			if (window.FileReader) {
+		this.read_thumbnail();
+	},
+	watch: {
+		"file.file_obj"() {
+			this.read_thumbnail();
+		},
+	},
+	methods: {
+		read_thumbnail() {
+			if (this.is_image && window.FileReader) {
 				let fr = new FileReader();
 				fr.onload = () => (this.src = fr.result);
 				fr.readAsDataURL(this.file.file_obj);
 			}
-		}
+		},
 	},
 	filters: {
 		file_size(value) {

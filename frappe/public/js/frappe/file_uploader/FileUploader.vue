@@ -218,8 +218,15 @@
 			v-if="show_image_cropper && wrapper_ready"
 			:file="files[crop_image_with_index]"
 			:fixed_aspect_ratio="restrictions.crop_image_aspect_ratio"
+			:show_remove_bg="show_remove_bg"
+			:remove_bg_checked="remove_bg_checked"
+			:show_watermark="show_watermark"
+			:watermark_settings="watermark_settings"
+			:wm_default_enabled="wm_enabled"
 			@toggle_image_cropper="toggle_image_cropper(-1)"
 			@upload_after_crop="trigger_upload = true"
+			@remove_bg_changed="remove_bg_checked = $event"
+			@wm_enabled_changed="wm_enabled = $event"
 		/>
 		<FileBrowser
 			ref="file_browser"
@@ -287,6 +294,18 @@ export default {
 		upload_notes: {
 			default: null, // "Images or video, upto 2MB"
 		},
+		show_remove_bg: {
+			default: false,
+		},
+		remove_bg_default: {
+			default: true,
+		},
+		show_watermark: {
+			default: false,
+		},
+		watermark_settings: {
+			default: null,
+		},
 	},
 	components: {
 		FilePreview,
@@ -312,6 +331,8 @@ export default {
 				enabled: false,
 			},
 			wrapper_ready: false,
+			remove_bg_checked: this.remove_bg_default,
+			wm_enabled: this.watermark_settings && this.watermark_settings.enabled ? true : false,
 		};
 	},
 	created() {
@@ -341,6 +362,16 @@ export default {
 			if (!this.allow_multiple && newvalue.length > 1) {
 				this.files = [newvalue[newvalue.length - 1]];
 			}
+		},
+		remove_bg_checked(checked) {
+			// Swap file_obj between original and nobg using cached files
+			this.files.forEach((file, i) => {
+				if (!file._original_file || !file._nobg_file) return;
+				let target = checked ? file._nobg_file : file._original_file;
+				// Use Vue.set to ensure reactivity
+				this.$set(file, "file_obj", target);
+				this.$set(file, "cropper_file", target);
+			});
 		},
 	},
 	computed: {
@@ -736,5 +767,83 @@ export default {
 	border: none;
 	box-shadow: none;
 	font-size: var(--text-xs);
+}
+
+.footer-toggle {
+	margin-right: 8px;
+}
+
+.footer-toggle:first-child {
+	margin-left: 0;
+}
+
+.footer-toggle .footer-toggle-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 12px;
+	border-radius: 20px;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	background: var(--bg-color);
+	border: 1px solid var(--border-color);
+	cursor: pointer;
+	transition: all 0.2s ease;
+	user-select: none;
+}
+
+.footer-toggle .footer-toggle-pill:hover {
+	border-color: var(--primary);
+}
+
+.footer-toggle .footer-toggle-pill.active {
+	color: var(--primary);
+	background: var(--control-bg);
+	border-color: var(--primary);
+}
+
+.footer-toggle .footer-toggle-pill.disabled {
+	opacity: 0.5;
+	cursor: pointer;
+	border-style: dashed;
+}
+
+.footer-toggle .footer-toggle-pill.disabled:hover {
+	border-color: var(--primary);
+	opacity: 0.7;
+}
+
+.footer-toggle-hint {
+	font-size: var(--text-xs);
+	color: var(--text-light);
+}
+
+.footer-toggle-track {
+	display: inline-block;
+	width: 28px;
+	height: 16px;
+	border-radius: 8px;
+	background: var(--gray-400);
+	position: relative;
+	transition: background 0.2s ease;
+}
+
+.footer-toggle-track.on {
+	background: var(--primary);
+}
+
+.footer-toggle-thumb {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: white;
+	transition: transform 0.2s ease;
+}
+
+.footer-toggle-track.on .footer-toggle-thumb {
+	transform: translateX(12px);
 }
 </style>
