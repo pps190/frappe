@@ -26,6 +26,8 @@ export default class FileUploader {
 	} = {}) {
 		frm && frm.attachments.max_reached(true);
 		this.show_remove_bg = show_remove_bg;
+		this.show_watermark = show_watermark;
+		this.watermark_settings = watermark_settings;
 
 		if (!wrapper) {
 			this.make_dialog(dialog_title);
@@ -104,6 +106,27 @@ export default class FileUploader {
 		if (files && files.length) {
 			this.uploader.add_files(files);
 		}
+
+		// Add footer toggles after uploader is ready
+		if (this.dialog && this.show_remove_bg) {
+			this.add_footer_toggle(
+				"remove_bg",
+				__("Remove Background"),
+				"remove_bg_checked",
+				true,
+			);
+		}
+		if (this.dialog && this.show_watermark) {
+			const has_config = this.watermark_settings && this.watermark_settings.watermark_image;
+			this.add_footer_toggle(
+				"watermark",
+				__("Watermark"),
+				"wm_enabled",
+				has_config && this.watermark_settings.enabled ? true : false,
+				has_config ? null : __("Click to configure watermark"),
+				has_config ? null : "/app/watermark-settings",
+			);
+		}
 	}
 
 	upload_files() {
@@ -122,7 +145,9 @@ export default class FileUploader {
 				this.uploader.toggle_all_private();
 			},
 			on_page_show: () => {
-				this.uploader.wrapper_ready = true;
+				if (this.uploader) {
+					this.uploader.wrapper_ready = true;
+				}
 			},
 		});
 
@@ -132,44 +157,47 @@ export default class FileUploader {
 			$(this).data("bs.modal", null);
 			$(this).remove();
 		});
-
-		if (this.show_remove_bg) {
-			this.add_footer_toggle(
-				"remove_bg",
-				__("Remove Background"),
-				"remove_bg_checked",
-				true,
-			);
-		}
 	}
 
-	add_footer_toggle(key, label, uploader_field, initial_active) {
+	add_footer_toggle(key, label, uploader_field, initial_active, disabled_hint, disabled_link) {
+		const disabled = !!disabled_hint;
 		const $toggle = $(`
 			<div class="footer-toggle" data-key="${key}">
-				<div class="footer-toggle-pill ${initial_active ? "active" : ""}">
+				<div class="footer-toggle-pill ${disabled ? "disabled" : (initial_active ? "active" : "")}">
 					<span class="footer-toggle-label">${label}</span>
-					<span class="footer-toggle-switch">
-						<span class="footer-toggle-track ${initial_active ? "on" : ""}">
-							<span class="footer-toggle-thumb"></span>
-						</span>
-					</span>
+					${disabled
+						? `<span class="footer-toggle-hint">${disabled_hint}</span>`
+						: `<span class="footer-toggle-switch">
+							<span class="footer-toggle-track ${initial_active ? "on" : ""}">
+								<span class="footer-toggle-thumb"></span>
+							</span>
+						</span>`
+					}
 				</div>
 			</div>
 		`);
 
 		this.dialog.footer.prepend($toggle);
 
-		$toggle.on("click", () => {
-			this.uploader[uploader_field] = !this.uploader[uploader_field];
-			const active = this.uploader[uploader_field];
-			$toggle.find(".footer-toggle-pill").toggleClass("active", active);
-			$toggle.find(".footer-toggle-track").toggleClass("on", active);
-		});
+		if (disabled) {
+			$toggle.on("click", () => {
+				if (disabled_link) {
+					window.open(disabled_link, "_blank");
+				}
+			});
+		} else {
+			$toggle.on("click", () => {
+				this.uploader[uploader_field] = !this.uploader[uploader_field];
+				const active = this.uploader[uploader_field];
+				$toggle.find(".footer-toggle-pill").toggleClass("active", active);
+				$toggle.find(".footer-toggle-track").toggleClass("on", active);
+			});
 
-		// Sync when uploader state changes (e.g. from ImageCropper)
-		this.uploader.$watch(uploader_field, (val) => {
-			$toggle.find(".footer-toggle-pill").toggleClass("active", val);
-			$toggle.find(".footer-toggle-track").toggleClass("on", val);
-		});
+			// Sync when uploader state changes (e.g. from ImageCropper)
+			this.uploader.$watch(uploader_field, (val) => {
+				$toggle.find(".footer-toggle-pill").toggleClass("active", val);
+				$toggle.find(".footer-toggle-track").toggleClass("on", val);
+			});
+		}
 	}
 }

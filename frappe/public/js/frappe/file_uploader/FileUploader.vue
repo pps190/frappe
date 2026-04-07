@@ -222,9 +222,11 @@
 			:remove_bg_checked="remove_bg_checked"
 			:show_watermark="show_watermark"
 			:watermark_settings="watermark_settings"
+			:wm_default_enabled="wm_enabled"
 			@toggle_image_cropper="toggle_image_cropper(-1)"
 			@upload_after_crop="trigger_upload = true"
 			@remove_bg_changed="remove_bg_checked = $event"
+			@wm_enabled_changed="wm_enabled = $event"
 		/>
 		<FileBrowser
 			ref="file_browser"
@@ -330,6 +332,7 @@ export default {
 			},
 			wrapper_ready: false,
 			remove_bg_checked: this.remove_bg_default,
+			wm_enabled: this.watermark_settings && this.watermark_settings.enabled ? true : false,
 		};
 	},
 	created() {
@@ -767,7 +770,11 @@ export default {
 }
 
 .footer-toggle {
-	margin-right: auto;
+	margin-right: 8px;
+}
+
+.footer-toggle:first-child {
+	margin-left: 0;
 }
 
 .footer-toggle .footer-toggle-pill {
@@ -793,6 +800,22 @@ export default {
 	color: var(--primary);
 	background: var(--control-bg);
 	border-color: var(--primary);
+}
+
+.footer-toggle .footer-toggle-pill.disabled {
+	opacity: 0.5;
+	cursor: pointer;
+	border-style: dashed;
+}
+
+.footer-toggle .footer-toggle-pill.disabled:hover {
+	border-color: var(--primary);
+	opacity: 0.7;
+}
+
+.footer-toggle-hint {
+	font-size: var(--text-xs);
+	color: var(--text-light);
 }
 
 .footer-toggle-track {
