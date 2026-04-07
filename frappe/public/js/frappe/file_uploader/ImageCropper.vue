@@ -57,6 +57,20 @@
 
 				<!-- Corner mode controls -->
 				<template v-if="wm_mode === 'Corner'">
+					<div class="wm-sliders-row">
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Opacity") }}</label>
+							<input type="range" class="wm-slider" min="5" max="100"
+								:value="wm_opacity" @input="wm_set_opacity(parseInt($event.target.value))" />
+							<span class="wm-slider-value">{{ wm_opacity }}%</span>
+						</div>
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Size") }}</label>
+							<input type="range" class="wm-slider" min="5" max="100"
+								:value="wm_size" @input="wm_set_size(parseFloat($event.target.value))" />
+							<span class="wm-slider-value">{{ Math.round(wm_size) }}%</span>
+						</div>
+					</div>
 					<div class="wm-controls-grid">
 						<div class="wm-control-field">
 							<label class="wm-control-label">{{ __("Position X") }}</label>
@@ -64,8 +78,7 @@
 								<input type="number" class="wm-input"
 									:value="Math.round(wm_pos_x * 10) / 10"
 									min="0" max="100" step="0.5"
-									@input="wm_set_pos_x(parseFloat($event.target.value))"
-								/>
+									@input="wm_set_pos_x(parseFloat($event.target.value))" />
 								<span class="wm-input-suffix">%</span>
 							</div>
 						</div>
@@ -75,8 +88,7 @@
 								<input type="number" class="wm-input"
 									:value="Math.round(wm_pos_y * 10) / 10"
 									min="0" max="100" step="0.5"
-									@input="wm_set_pos_y(parseFloat($event.target.value))"
-								/>
+									@input="wm_set_pos_y(parseFloat($event.target.value))" />
 								<span class="wm-input-suffix">%</span>
 							</div>
 						</div>
@@ -86,8 +98,7 @@
 								<input type="number" class="wm-input"
 									:value="Math.round(wm_size * 10) / 10"
 									min="5" max="100" step="1"
-									@input="wm_set_size(parseFloat($event.target.value))"
-								/>
+									@input="wm_set_size(parseFloat($event.target.value))" />
 								<span class="wm-input-suffix">%</span>
 							</div>
 						</div>
@@ -97,24 +108,41 @@
 								<input type="number" class="wm-input"
 									:value="wm_opacity"
 									min="5" max="100" step="1"
-									@input="wm_set_opacity(parseInt($event.target.value))"
-								/>
+									@input="wm_set_opacity(parseInt($event.target.value))" />
 								<span class="wm-input-suffix">%</span>
 							</div>
 						</div>
-					</div>
-					<div class="wm-opacity-row">
-						<label class="wm-control-label">{{ __("Opacity") }}</label>
-						<input type="range" class="wm-slider" min="5" max="100"
-							:value="wm_opacity"
-							@input="wm_set_opacity(parseInt($event.target.value))"
-						/>
-						<span class="wm-slider-value">{{ wm_opacity }}%</span>
 					</div>
 				</template>
 
 				<!-- Tiled mode controls -->
 				<template v-if="wm_mode === 'Tiled'">
+					<div class="wm-sliders-row">
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Opacity") }}</label>
+							<input type="range" class="wm-slider" min="5" max="100"
+								:value="wm_tile_opacity" @input="wm_set_tile_opacity(parseInt($event.target.value))" />
+							<span class="wm-slider-value">{{ wm_tile_opacity }}%</span>
+						</div>
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Tile Size") }}</label>
+							<input type="range" class="wm-slider" min="3" max="80"
+								:value="wm_tile_size" @input="wm_set_tile_size(parseInt($event.target.value))" />
+							<span class="wm-slider-value">{{ Math.round(wm_tile_size) }}%</span>
+						</div>
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Rotation") }}</label>
+							<input type="range" class="wm-slider" min="-180" max="180"
+								:value="wm_tile_rotation" @input="wm_set_tile_rotation(parseInt($event.target.value))" />
+							<span class="wm-slider-value">{{ wm_tile_rotation }}°</span>
+						</div>
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Spacing") }}</label>
+							<input type="range" class="wm-slider" min="0" max="100"
+								:value="wm_tile_spacing" @input="wm_set_tile_spacing(parseInt($event.target.value))" />
+							<span class="wm-slider-value">{{ wm_tile_spacing }}%</span>
+						</div>
+					</div>
 					<div class="wm-controls-grid">
 						<div class="wm-control-field">
 							<label class="wm-control-label">{{ __("Tile Size") }}</label>
@@ -122,8 +150,7 @@
 								<input type="number" class="wm-input"
 									:value="Math.round(wm_tile_size)"
 									min="3" max="80" step="1"
-									@input="wm_set_tile_size(parseInt($event.target.value))"
-								/>
+									@input="wm_set_tile_size(parseInt($event.target.value))" />
 								<span class="wm-input-suffix">%</span>
 							</div>
 						</div>
@@ -133,8 +160,7 @@
 								<input type="number" class="wm-input"
 									:value="wm_tile_opacity"
 									min="5" max="100" step="1"
-									@input="wm_set_tile_opacity(parseInt($event.target.value))"
-								/>
+									@input="wm_set_tile_opacity(parseInt($event.target.value))" />
 								<span class="wm-input-suffix">%</span>
 							</div>
 						</div>
@@ -143,9 +169,8 @@
 							<div class="wm-input-group">
 								<input type="number" class="wm-input"
 									:value="wm_tile_rotation"
-									min="-60" max="60" step="1"
-									@input="wm_set_tile_rotation(parseInt($event.target.value))"
-								/>
+									min="-180" max="180" step="1"
+									@input="wm_set_tile_rotation(parseInt($event.target.value))" />
 								<span class="wm-input-suffix">°</span>
 							</div>
 						</div>
@@ -155,19 +180,10 @@
 								<input type="number" class="wm-input"
 									:value="wm_tile_spacing"
 									min="0" max="100" step="1"
-									@input="wm_set_tile_spacing(parseInt($event.target.value))"
-								/>
+									@input="wm_set_tile_spacing(parseInt($event.target.value))" />
 								<span class="wm-input-suffix">%</span>
 							</div>
 						</div>
-					</div>
-					<div class="wm-opacity-row">
-						<label class="wm-control-label">{{ __("Opacity") }}</label>
-						<input type="range" class="wm-slider" min="5" max="100"
-							:value="wm_tile_opacity"
-							@input="wm_set_tile_opacity(parseInt($event.target.value))"
-						/>
-						<span class="wm-slider-value">{{ wm_tile_opacity }}%</span>
 					</div>
 				</template>
 
@@ -277,7 +293,7 @@ export default {
 			wm_mode: "Corner",
 			// Tiled mode params
 			wm_tile_size: 15,
-			wm_tile_opacity: 20,
+			wm_tile_opacity: 12,
 			wm_tile_rotation: -30,
 			wm_tile_spacing: 40,
 			// Interaction mode
@@ -745,7 +761,7 @@ export default {
 		},
 		wm_set_tile_rotation(val) {
 			if (isNaN(val)) return;
-			this.wm_tile_rotation = Math.max(-60, Math.min(60, val));
+			this.wm_tile_rotation = Math.max(-180, Math.min(180, val));
 			this.wm_draw();
 		},
 		wm_set_tile_spacing(val) {
@@ -1092,20 +1108,23 @@ img {
 	flex-shrink: 0;
 }
 
-.wm-opacity-row {
+.wm-sliders-row {
 	display: flex;
-	align-items: center;
-	gap: 8px;
-	margin-top: 8px;
+	gap: 12px;
+	flex-wrap: wrap;
+	margin-bottom: 8px;
 }
 
-.wm-opacity-row .wm-control-label {
-	flex-shrink: 0;
-	min-width: 46px;
+.wm-slider-field {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	flex: 1;
+	min-width: 100px;
 }
 
 .wm-slider {
-	flex: 1;
+	width: 100%;
 	height: 4px;
 	cursor: pointer;
 	accent-color: var(--primary);
@@ -1114,9 +1133,7 @@ img {
 .wm-slider-value {
 	font-size: 11px;
 	color: var(--text-muted);
-	min-width: 36px;
-	text-align: right;
-	flex-shrink: 0;
+	text-align: center;
 }
 
 .wm-panel-actions {
