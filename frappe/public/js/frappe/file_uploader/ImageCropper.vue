@@ -121,7 +121,7 @@
 							<div class="wm-input-group">
 								<input type="number" class="wm-input"
 									:value="Math.round(wm_tile_size)"
-									min="5" max="50" step="1"
+									min="3" max="80" step="1"
 									@input="wm_set_tile_size(parseInt($event.target.value))"
 								/>
 								<span class="wm-input-suffix">%</span>
@@ -143,7 +143,7 @@
 							<div class="wm-input-group">
 								<input type="number" class="wm-input"
 									:value="wm_tile_rotation"
-									min="-60" max="0" step="1"
+									min="-60" max="60" step="1"
 									@input="wm_set_tile_rotation(parseInt($event.target.value))"
 								/>
 								<span class="wm-input-suffix">°</span>
@@ -154,7 +154,7 @@
 							<div class="wm-input-group">
 								<input type="number" class="wm-input"
 									:value="wm_tile_spacing"
-									min="10" max="80" step="1"
+									min="0" max="100" step="1"
 									@input="wm_set_tile_spacing(parseInt($event.target.value))"
 								/>
 								<span class="wm-input-suffix">%</span>
@@ -735,7 +735,7 @@ export default {
 		},
 		wm_set_tile_size(val) {
 			if (isNaN(val)) return;
-			this.wm_tile_size = Math.max(5, Math.min(50, val));
+			this.wm_tile_size = Math.max(3, Math.min(80, val));
 			this.wm_draw();
 		},
 		wm_set_tile_opacity(val) {
@@ -745,12 +745,12 @@ export default {
 		},
 		wm_set_tile_rotation(val) {
 			if (isNaN(val)) return;
-			this.wm_tile_rotation = Math.max(-60, Math.min(0, val));
+			this.wm_tile_rotation = Math.max(-60, Math.min(60, val));
 			this.wm_draw();
 		},
 		wm_set_tile_spacing(val) {
 			if (isNaN(val)) return;
-			this.wm_tile_spacing = Math.max(10, Math.min(80, val));
+			this.wm_tile_spacing = Math.max(0, Math.min(100, val));
 			this.wm_draw();
 		},
 		async wm_save_defaults() {
