@@ -220,6 +220,8 @@
 			:fixed_aspect_ratio="restrictions.crop_image_aspect_ratio"
 			:show_remove_bg="show_remove_bg"
 			:remove_bg_checked="remove_bg_checked"
+			:show_watermark="show_watermark"
+			:watermark_settings="watermark_settings"
 			@toggle_image_cropper="toggle_image_cropper(-1)"
 			@upload_after_crop="trigger_upload = true"
 			@remove_bg_changed="remove_bg_checked = $event"
@@ -295,6 +297,12 @@ export default {
 		},
 		remove_bg_default: {
 			default: true,
+		},
+		show_watermark: {
+			default: false,
+		},
+		watermark_settings: {
+			default: null,
 		},
 	},
 	components: {
@@ -758,11 +766,11 @@ export default {
 	font-size: var(--text-xs);
 }
 
-.remove-bg-footer-toggle {
+.footer-toggle {
 	margin-right: auto;
 }
 
-.remove-bg-footer-toggle .remove-bg-pill {
+.footer-toggle .footer-toggle-pill {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
@@ -777,17 +785,17 @@ export default {
 	user-select: none;
 }
 
-.remove-bg-footer-toggle .remove-bg-pill:hover {
+.footer-toggle .footer-toggle-pill:hover {
 	border-color: var(--primary);
 }
 
-.remove-bg-footer-toggle .remove-bg-pill.active {
+.footer-toggle .footer-toggle-pill.active {
 	color: var(--primary);
 	background: var(--control-bg);
 	border-color: var(--primary);
 }
 
-.remove-bg-track {
+.footer-toggle-track {
 	display: inline-block;
 	width: 28px;
 	height: 16px;
@@ -797,11 +805,11 @@ export default {
 	transition: background 0.2s ease;
 }
 
-.remove-bg-track.on {
+.footer-toggle-track.on {
 	background: var(--primary);
 }
 
-.remove-bg-thumb {
+.footer-toggle-thumb {
 	position: absolute;
 	top: 2px;
 	left: 2px;
@@ -812,7 +820,7 @@ export default {
 	transition: transform 0.2s ease;
 }
 
-.remove-bg-track.on .remove-bg-thumb {
+.footer-toggle-track.on .footer-toggle-thumb {
 	transform: translateX(12px);
 }
 </style>
