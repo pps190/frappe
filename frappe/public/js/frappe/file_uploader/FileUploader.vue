@@ -218,7 +218,7 @@
 			v-if="show_image_cropper && wrapper_ready"
 			:file="files[crop_image_with_index]"
 			:fixed_aspect_ratio="restrictions.crop_image_aspect_ratio"
-			:show_remove_bg="show_remove_bg"
+			:show_remove_bg="show_remove_bg && !remove_bg_disabled_hint"
 			:remove_bg_checked="remove_bg_checked"
 			:show_watermark="show_watermark"
 			:watermark_settings="watermark_settings"
@@ -300,6 +300,9 @@ export default {
 		remove_bg_default: {
 			default: true,
 		},
+		remove_bg_disabled_hint: {
+			default: null,
+		},
 		show_watermark: {
 			default: false,
 		},
@@ -331,7 +334,7 @@ export default {
 				enabled: false,
 			},
 			wrapper_ready: false,
-			remove_bg_checked: this.remove_bg_default,
+			remove_bg_checked: this.remove_bg_default && !this.remove_bg_disabled_hint,
 			wm_enabled: this.watermark_settings && this.watermark_settings.enabled ? true : false,
 		};
 	},

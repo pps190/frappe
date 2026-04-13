@@ -21,11 +21,15 @@ export default class FileUploader {
 		make_attachments_public,
 		show_remove_bg,
 		remove_bg_default,
+		remove_bg_disabled_hint,
+		remove_bg_disabled_link,
 		show_watermark,
 		watermark_settings,
 	} = {}) {
 		frm && frm.attachments.max_reached(true);
 		this.show_remove_bg = show_remove_bg;
+		this.remove_bg_disabled_hint = remove_bg_disabled_hint;
+		this.remove_bg_disabled_link = remove_bg_disabled_link;
 		this.show_watermark = show_watermark;
 		this.watermark_settings = watermark_settings;
 
@@ -56,6 +60,7 @@ export default class FileUploader {
 						make_attachments_public,
 						show_remove_bg,
 						remove_bg_default,
+						remove_bg_disabled_hint,
 						show_watermark,
 						watermark_settings,
 					},
@@ -113,7 +118,9 @@ export default class FileUploader {
 				"remove_bg",
 				__("Remove Background"),
 				"remove_bg_checked",
-				true,
+				!this.remove_bg_disabled_hint,
+				this.remove_bg_disabled_hint || null,
+				this.remove_bg_disabled_link || null,
 			);
 		}
 		if (this.dialog && this.show_watermark) {
