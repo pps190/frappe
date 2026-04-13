@@ -21,11 +21,15 @@ export default class FileUploader {
 		make_attachments_public,
 		show_remove_bg,
 		remove_bg_default,
+		remove_bg_disabled_hint,
+		remove_bg_disabled_link,
 		show_watermark,
 		watermark_settings,
 	} = {}) {
 		frm && frm.attachments.max_reached(true);
 		this.show_remove_bg = show_remove_bg;
+		this.remove_bg_disabled_hint = remove_bg_disabled_hint;
+		this.remove_bg_disabled_link = remove_bg_disabled_link;
 		this.show_watermark = show_watermark;
 		this.watermark_settings = watermark_settings;
 
@@ -56,6 +60,7 @@ export default class FileUploader {
 						make_attachments_public,
 						show_remove_bg,
 						remove_bg_default,
+						remove_bg_disabled_hint,
 						show_watermark,
 						watermark_settings,
 					},
@@ -103,6 +108,16 @@ export default class FileUploader {
 			}
 		});
 
+		// Disable Upload/Set all private only while an upload is actually
+		// in-flight (currently_uploading >= 0). Re-enable when idle (-1) so
+		// users can retry after a failed upload or after cancelling a crop.
+		this.uploader.$watch("currently_uploading", (val) => {
+			if (!this.dialog) return;
+			const uploading = val >= 0;
+			this.dialog.get_primary_btn().prop("disabled", uploading);
+			this.dialog.get_secondary_btn().prop("disabled", uploading);
+		});
+
 		if (files && files.length) {
 			this.uploader.add_files(files);
 		}
@@ -113,7 +128,9 @@ export default class FileUploader {
 				"remove_bg",
 				__("Remove Background"),
 				"remove_bg_checked",
-				true,
+				!this.remove_bg_disabled_hint,
+				this.remove_bg_disabled_hint || null,
+				this.remove_bg_disabled_link || null,
 			);
 		}
 		if (this.dialog && this.show_watermark) {
@@ -130,8 +147,25 @@ export default class FileUploader {
 	}
 
 	upload_files() {
-		this.dialog && this.dialog.get_primary_btn().prop("disabled", true);
-		this.dialog && this.dialog.get_secondary_btn().prop("disabled", true);
+		// Guard against clicking Upload before a file is selected. Without this,
+		// the no-op upload would still trigger the disable path below and leave
+		// users stuck. Special modes (file_browser, web_link) handle their own
+		// no-selection case downstream.
+		const uploader = this.uploader;
+		const has_files = uploader && uploader.files && uploader.files.length > 0;
+		const in_special_mode =
+			uploader && (uploader.show_file_browser || uploader.show_web_link);
+		if (!has_files && !in_special_mode) {
+			frappe.show_alert({
+				message: __("Please select a file first"),
+				indicator: "orange",
+			});
+			return;
+		}
+
+		// Button state is managed by the currently_uploading watcher below —
+		// only really disable while an upload is in-flight, so users can still
+		// re-click Upload after cropping or after a failed attempt.
 		return this.uploader.upload_files();
 	}
 
