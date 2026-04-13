@@ -550,9 +550,13 @@ export default {
 			if (this.as_dataurl) {
 				return this.return_as_dataurl();
 			}
-			return frappe.run_serially(
-				this.files.map((file, i) => () => this.upload_file(file, i))
-			);
+			return frappe
+				.run_serially(this.files.map((file, i) => () => this.upload_file(file, i)))
+				.finally(() => {
+					// Reset upload state so the primary button re-enables when
+					// any upload ends (success that didn't auto-close, or error).
+					this.currently_uploading = -1;
+				});
 		},
 		upload_via_file_browser() {
 			let selected_file = this.$refs.file_browser.selected_node;
