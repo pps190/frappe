@@ -23,6 +23,7 @@ export default class FileUploader {
 		remove_bg_default,
 		remove_bg_disabled_hint,
 		remove_bg_disabled_link,
+		remove_bg_padding_pct,
 		show_watermark,
 		watermark_settings,
 	} = {}) {
@@ -30,6 +31,7 @@ export default class FileUploader {
 		this.show_remove_bg = show_remove_bg;
 		this.remove_bg_disabled_hint = remove_bg_disabled_hint;
 		this.remove_bg_disabled_link = remove_bg_disabled_link;
+		this.remove_bg_padding_pct = remove_bg_padding_pct;
 		this.show_watermark = show_watermark;
 		this.watermark_settings = watermark_settings;
 
@@ -61,6 +63,7 @@ export default class FileUploader {
 						show_remove_bg,
 						remove_bg_default,
 						remove_bg_disabled_hint,
+						remove_bg_padding_pct,
 						show_watermark,
 						watermark_settings,
 					},

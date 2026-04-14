@@ -265,7 +265,7 @@ export default {
 	name: "ImageCropper",
 	props: [
 		"file", "fixed_aspect_ratio",
-		"show_remove_bg", "remove_bg_checked",
+		"show_remove_bg", "remove_bg_checked", "remove_bg_padding_pct",
 		"show_watermark", "watermark_settings", "wm_default_enabled",
 	],
 	data() {
@@ -279,6 +279,13 @@ export default {
 			bg_processing: false,
 			original_file: null,
 			nobg_file: null,
+			// Auto-crop metadata from microservice (Phase 1). `nobg_bbox` is the
+			// non-transparent bounding box of the processed PNG; when present, the
+			// Cropper `ready` callback snaps the initial crop box to it plus the
+			// configured padding. Null means "no auto-crop" (legacy microservice
+			// response or Remove BG disabled) and Cropper falls back to default.
+			nobg_bbox: null,
+			nobg_natural_size: null,
 			// Watermark
 			wm_enabled: false,
 			wm_loaded: false,
@@ -308,9 +315,11 @@ export default {
 		},
 	},
 	mounted() {
-		// Remove BG: cached files
+		// Remove BG: cached files + bbox metadata (Phase 1)
 		this.original_file = this.file._original_file || this.file.cropper_file;
 		this.nobg_file = this.file._nobg_file || null;
+		this.nobg_bbox = this.file._nobg_bbox || null;
+		this.nobg_natural_size = this.file._nobg_natural_size || null;
 		this.file._original_file = this.original_file;
 
 		if (this.remove_bg_checked && this.nobg_file) {
@@ -390,6 +399,19 @@ export default {
 					data: crop_box,
 					aspectRatio: this.aspect_ratio,
 					ready: () => {
+						// Phase 1 auto-crop: if Remove BG produced a bbox AND the
+						// user hasn't already saved a manual crop_box_data for this
+						// file, snap the initial crop box to bbox + padding.
+						// We respect crop_box_data because users who already tweaked
+						// the crop shouldn't have their work overwritten when the
+						// cropper re-mounts (e.g. after toggling Remove BG).
+						if (
+							this.bg_removed &&
+							this.nobg_bbox &&
+							!this.file.crop_box_data
+						) {
+							this._apply_auto_crop();
+						}
 						if (this.wm_enabled && this.wm_loaded) {
 							this.$nextTick(() => this.wm_resize_canvas());
 						}
@@ -401,6 +423,29 @@ export default {
 					},
 				});
 			};
+		},
+
+		// ── Auto-crop (Phase 1) ──
+		_apply_auto_crop() {
+			// Snap the Cropper crop box to the product's non-transparent bounding
+			// box plus a configurable padding. Called from the Cropper `ready`
+			// callback after a Remove BG result is loaded.
+			//
+			// Padding is a percentage of the LONGER side of the bbox (so wide or
+			// tall products both get a proportional border). Negative values
+			// tighten into the bbox to shed anti-aliasing halos. CropperJS clamps
+			// the final rectangle to the image bounds automatically.
+			if (!this.cropper || !this.nobg_bbox) return;
+			const { x, y, width, height } = this.nobg_bbox;
+			const pct = Number(this.remove_bg_padding_pct);
+			const padding_pct = Number.isFinite(pct) ? pct : 5;
+			const pad = (padding_pct / 100) * Math.max(width, height);
+			this.cropper.setData({
+				x: x - pad,
+				y: y - pad,
+				width: width + 2 * pad,
+				height: height + 2 * pad,
+			});
 		},
 
 		// ── Crop ──
@@ -512,6 +557,12 @@ export default {
 					let blob = await blob_resp.blob();
 					this.nobg_file = new File([blob], "nobg.png", { type: "image/png" });
 					this.file._nobg_file = this.nobg_file;
+					// Phase 1: capture bbox + natural_size for auto-crop. Null when
+					// the microservice returned a legacy raw-PNG response.
+					this.nobg_bbox = (resp.message && resp.message.bbox) || null;
+					this.nobg_natural_size = (resp.message && resp.message.natural_size) || null;
+					this.file._nobg_bbox = this.nobg_bbox;
+					this.file._nobg_natural_size = this.nobg_natural_size;
 					this.bg_removed = true;
 					this.file.cropper_file = this.nobg_file;
 					this.file.file_obj = this.nobg_file;

@@ -220,6 +220,7 @@
 			:fixed_aspect_ratio="restrictions.crop_image_aspect_ratio"
 			:show_remove_bg="show_remove_bg && !remove_bg_disabled_hint"
 			:remove_bg_checked="remove_bg_checked"
+			:remove_bg_padding_pct="remove_bg_padding_pct"
 			:show_watermark="show_watermark"
 			:watermark_settings="watermark_settings"
 			:wm_default_enabled="wm_enabled"
@@ -302,6 +303,9 @@ export default {
 		},
 		remove_bg_disabled_hint: {
 			default: null,
+		},
+		remove_bg_padding_pct: {
+			default: 5,
 		},
 		show_watermark: {
 			default: false,
