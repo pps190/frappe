@@ -24,7 +24,10 @@
 		<div
 			class="cropper-image-wrapper"
 			ref="wrapper"
-			:class="{ 'wm-mode': interaction_mode === 'watermark' }"
+			:class="{
+				'wm-mode': interaction_mode === 'watermark',
+				'bg-processing': bg_processing,
+			}"
 			@mousedown="on_wrapper_mousedown"
 			@wheel.prevent="on_wrapper_wheel"
 			@touchstart="on_wrapper_touchstart"
@@ -931,6 +934,19 @@ img {
 
 .cropper-image-wrapper.wm-mode {
 	cursor: move;
+}
+
+/* While Remove BG is running, hide CropperJS's own crop-box chrome so the
+   user sees just the plain image + loading overlay. The crop box is
+   meaningless during this ~10-second window (auto-crop will overwrite it
+   when the bbox arrives), and leaving it visible is a visual distraction. */
+.cropper-image-wrapper.bg-processing >>> .cropper-crop-box,
+.cropper-image-wrapper.bg-processing >>> .cropper-dashed,
+.cropper-image-wrapper.bg-processing >>> .cropper-line,
+.cropper-image-wrapper.bg-processing >>> .cropper-point,
+.cropper-image-wrapper.bg-processing >>> .cropper-face,
+.cropper-image-wrapper.bg-processing >>> .cropper-view-box {
+	display: none !important;
 }
 
 .watermark-overlay-canvas {
