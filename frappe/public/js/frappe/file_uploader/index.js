@@ -197,30 +197,47 @@ export default class FileUploader {
 	}
 
 	add_footer_toggle(key, label, uploader_field, initial_active, disabled_hint, disabled_link) {
+		// Disabled state: the pill itself renders with the same shape + switch
+		// chrome as a normal pill (just in a "grey/off" visual state so the
+		// footer layout stays uniform). The pill is non-interactive. A separate
+		// red ⓘ button sits to the right of the pill — clicking it opens a
+		// frappe.confirm dialog that shows the reason and asks whether to jump
+		// to the admin settings page.
 		const disabled = !!disabled_hint;
 		const $toggle = $(`
 			<div class="footer-toggle" data-key="${key}">
-				<div class="footer-toggle-pill ${disabled ? "disabled" : (initial_active ? "active" : "")}">
+				<div class="footer-toggle-pill ${disabled ? "is-disabled" : (initial_active ? "active" : "")}">
 					<span class="footer-toggle-label">${label}</span>
-					${disabled
-						? `<span class="footer-toggle-hint">${disabled_hint}</span>`
-						: `<span class="footer-toggle-switch">
-							<span class="footer-toggle-track ${initial_active ? "on" : ""}">
-								<span class="footer-toggle-thumb"></span>
-							</span>
-						</span>`
-					}
+					<span class="footer-toggle-switch">
+						<span class="footer-toggle-track ${!disabled && initial_active ? "on" : ""}">
+							<span class="footer-toggle-thumb"></span>
+						</span>
+					</span>
 				</div>
+				${disabled
+					? `<button type="button" class="footer-toggle-info-btn" aria-label="${__("Why is this disabled?")}">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+					</button>`
+					: ""
+				}
 			</div>
 		`);
 
 		this.dialog.footer.prepend($toggle);
 
 		if (disabled) {
-			$toggle.on("click", () => {
-				if (disabled_link) {
-					window.open(disabled_link, "_blank");
-				}
+			// Info button: open a modern info popover explaining why the
+			// feature is disabled. Only System Managers see the actionable
+			// "Open settings" button — everyone else gets a read-only notice
+			// telling them to ask a System Manager.
+			$toggle.find(".footer-toggle-info-btn").on("click", (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				show_disabled_feature_notice({
+					feature_label: label,
+					reason: disabled_hint,
+					settings_link: disabled_link,
+				});
 			});
 		} else {
 			$toggle.on("click", () => {
@@ -237,4 +254,72 @@ export default class FileUploader {
 			});
 		}
 	}
+}
+
+// ── Disabled feature notice ─────────────────────────────────────────────
+//
+// Shown when the user clicks the red ⓘ button next to a disabled footer
+// toggle pill (e.g. Remove Background turned off in Image Processing
+// Settings, or Watermark not configured).
+//
+// UX rules:
+//   - Every user sees the reason text
+//   - System Managers also see a primary "Open settings" button
+//   - Non-System-Managers see a read-only note asking them to contact a
+//     System Manager — no actionable link
+//
+// The dialog is a custom Bootstrap modal rather than frappe.confirm /
+// frappe.msgprint so we can style it consistently with the new Upload
+// dialog header (rounded card, warning icon, muted reason paragraph,
+// grouped action buttons).
+function show_disabled_feature_notice({ feature_label, reason, settings_link }) {
+	const is_system_manager =
+		Array.isArray(frappe.user_roles) && frappe.user_roles.includes("System Manager");
+
+	// Build a minimal Bootstrap modal that matches the Upload dialog style.
+	const $modal = $(`
+		<div class="modal fade feature-disabled-modal" tabindex="-1" role="dialog">
+			<div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+				<div class="modal-content">
+					<div class="feature-disabled-body">
+						<div class="feature-disabled-icon">
+							<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+								<line x1="12" y1="9" x2="12" y2="13"/>
+								<line x1="12" y1="17" x2="12.01" y2="17"/>
+							</svg>
+						</div>
+						<h4 class="feature-disabled-title">${__("{0} unavailable", [frappe.utils.escape_html(feature_label)])}</h4>
+						<p class="feature-disabled-reason">${frappe.utils.escape_html(reason)}</p>
+						${!is_system_manager
+							? `<div class="feature-disabled-note">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+								${__("Only a System Manager can change this setting.")}
+							</div>`
+							: ""
+						}
+					</div>
+					<div class="feature-disabled-actions">
+						<button type="button" class="btn btn-default btn-sm" data-action="close">${__("Got it")}</button>
+						${is_system_manager && settings_link
+							? `<button type="button" class="btn btn-primary btn-sm" data-action="open-settings">
+								${__("Open Settings")}
+							</button>`
+							: ""
+						}
+					</div>
+				</div>
+			</div>
+		</div>
+	`);
+
+	$("body").append($modal);
+	$modal.modal({ backdrop: true, keyboard: true });
+	$modal.on("hidden.bs.modal", () => $modal.remove());
+
+	$modal.find('[data-action="close"]').on("click", () => $modal.modal("hide"));
+	$modal.find('[data-action="open-settings"]').on("click", () => {
+		$modal.modal("hide");
+		window.open(settings_link, "_blank");
+	});
 }
