@@ -220,6 +220,7 @@
 			:fixed_aspect_ratio="restrictions.crop_image_aspect_ratio"
 			:show_remove_bg="show_remove_bg && !remove_bg_disabled_hint"
 			:remove_bg_checked="remove_bg_checked"
+			:remove_bg_padding_pct="remove_bg_padding_pct"
 			:show_watermark="show_watermark"
 			:watermark_settings="watermark_settings"
 			:wm_default_enabled="wm_enabled"
@@ -302,6 +303,9 @@ export default {
 		},
 		remove_bg_disabled_hint: {
 			default: null,
+		},
+		remove_bg_padding_pct: {
+			default: 5,
 		},
 		show_watermark: {
 			default: false,
@@ -777,6 +781,9 @@ export default {
 }
 
 .footer-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
 	margin-right: 8px;
 }
 
@@ -803,26 +810,67 @@ export default {
 	border-color: var(--primary);
 }
 
+/* Keyboard focus ring for the switch pill. The pill is role="switch"
+   with tabindex=0 so users without a mouse reach it through the tab
+   order; without this rule they'd see no focus cue at all and never
+   know they can press Space to toggle. */
+.footer-toggle .footer-toggle-pill:focus-visible {
+	outline: 2px solid var(--primary);
+	outline-offset: 2px;
+}
+
 .footer-toggle .footer-toggle-pill.active {
 	color: var(--primary);
 	background: var(--control-bg);
 	border-color: var(--primary);
 }
 
-.footer-toggle .footer-toggle-pill.disabled {
-	opacity: 0.5;
+/* Disabled pill keeps the exact same shape/padding/border as a normal
+   off-state pill — just with a locked grey switch and a muted label. No
+   dashed border, no opacity tricks; the red info button next to it signals
+   "unavailable". */
+.footer-toggle .footer-toggle-pill.is-disabled {
+	cursor: not-allowed;
+	pointer-events: none;
+	color: var(--text-light, var(--text-muted));
+	background: var(--bg-color);
+	border-color: var(--border-color);
+}
+
+.footer-toggle .footer-toggle-pill.is-disabled .footer-toggle-track {
+	background: var(--gray-300, #d1d5db);
+}
+
+/* ── Red circular info button (shown only when the pill is disabled) ── */
+.footer-toggle-info-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border-radius: 50%;
+	border: 1px solid var(--red-300, #fca5a5);
+	background: var(--red-50, #fef2f2);
+	color: var(--red-500, #ef4444);
 	cursor: pointer;
-	border-style: dashed;
+	transition: all 0.15s ease;
+	flex-shrink: 0;
 }
 
-.footer-toggle .footer-toggle-pill.disabled:hover {
-	border-color: var(--primary);
-	opacity: 0.7;
+.footer-toggle-info-btn:hover {
+	background: var(--red-500, #ef4444);
+	color: white;
+	border-color: var(--red-500, #ef4444);
+	box-shadow: 0 1px 3px rgba(239, 68, 68, 0.3);
 }
 
-.footer-toggle-hint {
-	font-size: var(--text-xs);
-	color: var(--text-light);
+.footer-toggle-info-btn:active {
+	transform: scale(0.92);
+}
+
+.footer-toggle-info-btn svg {
+	display: block;
 }
 
 .footer-toggle-track {
@@ -852,5 +900,82 @@ export default {
 
 .footer-toggle-track.on .footer-toggle-thumb {
 	transform: translateX(12px);
+}
+</style>
+
+<!-- Global (non-scoped) styles: the feature-disabled modal is appended to
+     <body> so it lives outside this component's scope. -->
+<style>
+.feature-disabled-modal .modal-content {
+	border: none;
+	border-radius: 12px;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+	overflow: hidden;
+}
+
+.feature-disabled-modal .feature-disabled-body {
+	padding: 24px 24px 16px;
+	text-align: center;
+}
+
+.feature-disabled-modal .feature-disabled-icon {
+	width: 56px;
+	height: 56px;
+	margin: 0 auto 14px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	background: var(--orange-50, #fff7ed);
+	color: var(--orange-500, #f97316);
+}
+
+.feature-disabled-modal .feature-disabled-title {
+	margin: 0 0 8px;
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--text-color);
+}
+
+.feature-disabled-modal .feature-disabled-reason {
+	margin: 0 0 12px;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-muted);
+}
+
+.feature-disabled-modal .feature-disabled-note {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 4px;
+	padding: 6px 12px;
+	border-radius: 16px;
+	background: var(--bg-color);
+	border: 1px solid var(--border-color);
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.feature-disabled-modal .feature-disabled-note svg {
+	flex-shrink: 0;
+	color: var(--text-light, var(--text-muted));
+}
+
+.feature-disabled-modal .feature-disabled-actions {
+	display: flex;
+	gap: 8px;
+	justify-content: center;
+	padding: 12px 24px 20px;
+	border-top: 1px solid var(--border-color);
+	background: var(--bg-color);
+}
+
+.feature-disabled-modal .feature-disabled-actions .btn {
+	min-width: 96px;
+	padding: 6px 18px;
+	font-size: 13px;
+	font-weight: 500;
+	border-radius: 8px;
 }
 </style>

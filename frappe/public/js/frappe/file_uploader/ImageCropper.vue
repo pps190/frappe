@@ -1,30 +1,44 @@
 <template>
 	<div>
-		<!-- Mode switcher — visible whenever watermark feature is available -->
-		<div v-if="show_watermark && watermark_settings" class="mode-switcher">
-			<button
-				class="mode-btn"
-				:class="{ active: interaction_mode === 'crop' }"
-				@click="set_mode('crop')"
-			>
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/></svg>
-				{{ __("Crop") }}
-			</button>
-			<button
-				class="mode-btn"
-				:class="{ active: interaction_mode === 'watermark', disabled: !wm_enabled || !wm_loaded }"
-				:disabled="!wm_enabled || !wm_loaded"
-				@click="set_mode('watermark')"
-			>
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-				{{ __("Watermark") }}
-			</button>
+		<!-- Interaction-mode switcher: Corner mode only (Tiled has no drag target). -->
+		<div
+			v-if="show_watermark && wm_enabled && wm_loaded && wm_mode === 'Corner'"
+			class="interaction-switcher"
+		>
+			<span class="interaction-switcher-label">{{ __("Drag on image") }}</span>
+			<div class="segmented-tabs" role="tablist">
+				<button
+					class="segmented-tab"
+					:class="{ active: interaction_mode === 'crop' }"
+					role="tab"
+					:aria-selected="interaction_mode === 'crop'"
+					:title="__('Drag to resize/move the crop box')"
+					@click="set_mode('crop')"
+				>
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/></svg>
+					{{ __("Crop box") }}
+				</button>
+				<button
+					class="segmented-tab"
+					:class="{ active: interaction_mode === 'watermark' }"
+					role="tab"
+					:aria-selected="interaction_mode === 'watermark'"
+					:title="__('Drag to move the watermark logo')"
+					@click="set_mode('watermark')"
+				>
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+					{{ __("Watermark") }}
+				</button>
+			</div>
 		</div>
 
 		<div
 			class="cropper-image-wrapper"
 			ref="wrapper"
-			:class="{ 'wm-mode': interaction_mode === 'watermark' }"
+			:class="{
+				'wm-mode': interaction_mode === 'watermark' && wm_mode === 'Corner',
+				'bg-processing': bg_processing,
+			}"
 			@mousedown="on_wrapper_mousedown"
 			@wheel.prevent="on_wrapper_wheel"
 			@touchstart="on_wrapper_touchstart"
@@ -34,7 +48,7 @@
 				v-if="wm_enabled && wm_loaded"
 				ref="wm_canvas"
 				class="watermark-overlay-canvas"
-				:style="{ pointerEvents: interaction_mode === 'watermark' ? 'auto' : 'none' }"
+				:style="{ pointerEvents: (interaction_mode === 'watermark' && wm_mode === 'Corner') ? 'auto' : 'none' }"
 			></canvas>
 			<div v-if="bg_processing" class="cropper-loading-overlay">
 				<div class="cropper-spinner"></div>
@@ -42,78 +56,86 @@
 			</div>
 		</div>
 
-		<!-- Watermark control panel (collapsible) -->
-		<transition name="wm-panel">
-			<div v-if="wm_enabled && wm_loaded" class="wm-controls-panel">
-				<!-- Mode selector -->
-				<div class="wm-mode-selector">
-					<button class="wm-mode-btn" :class="{ active: wm_mode === 'Corner' }" @click="wm_set_mode('Corner')">
-						{{ __("Corner") }}
+		<!-- ─── Unified Image Adjustments panel ───
+		     Both Remove BG auto-crop padding and Watermark knobs share a single
+		     panel so the dialog stays compact. The top toggles (Remove BG /
+		     Watermark) live in the sticky dialog footer; this panel only hosts
+		     the parameters for whichever features are currently on. -->
+		<div
+			v-if="(show_remove_bg && bg_removed && nobg_bbox) || (show_watermark && wm_enabled)"
+			class="adjustments-panel"
+		>
+			<!-- Auto-crop padding (Remove BG) — only shown when Remove BG is on
+			     AND a bbox is available. -->
+			<div
+				v-if="show_remove_bg && bg_removed && nobg_bbox"
+				class="adjustments-row"
+			>
+				<label class="adjustments-field-label">
+					{{ __("Auto-crop padding") }}
+				</label>
+				<div class="padding-input-row">
+					<input
+						type="range"
+						class="wm-slider"
+						min="-20" max="40" step="1"
+						:value="effective_padding_pct"
+						@input="set_padding_pct(parseInt($event.target.value))"
+					/>
+					<div class="wm-input-group padding-input-group">
+						<input
+							type="number"
+							class="wm-input"
+							min="-20" max="40" step="1"
+							:value="effective_padding_pct"
+							@input="set_padding_pct(parseInt($event.target.value))"
+						/>
+						<span class="wm-input-suffix">%</span>
+					</div>
+				</div>
+				<div class="wm-panel-actions">
+					<button class="btn btn-xs btn-default" @click="reset_padding_pct">
+						{{ __("Reset") }}
 					</button>
-					<button class="wm-mode-btn" :class="{ active: wm_mode === 'Tiled' }" @click="wm_set_mode('Tiled')">
-						{{ __("Tiled") }}
+					<button class="btn btn-xs btn-primary-light" @click="save_padding_default">
+						{{ __("Save as Default") }}
 					</button>
 				</div>
+			</div>
+			<div
+				v-else-if="show_remove_bg && bg_removed && !nobg_bbox"
+				class="adjustments-row adjustments-warn"
+			>
+				{{ __("Auto-crop not available — microservice did not return a bounding box.") }}
+			</div>
 
-				<!-- Corner mode controls -->
-				<template v-if="wm_mode === 'Corner'">
-					<div class="wm-sliders-row">
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Opacity") }}</label>
-							<input type="range" class="wm-slider" min="5" max="100"
-								:value="wm_opacity" @input="wm_set_opacity(parseInt($event.target.value))" />
-							<span class="wm-slider-value">{{ wm_opacity }}%</span>
-						</div>
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Size") }}</label>
-							<input type="range" class="wm-slider" min="5" max="100"
-								:value="wm_size" @input="wm_set_size(parseFloat($event.target.value))" />
-							<span class="wm-slider-value">{{ Math.round(wm_size) }}%</span>
-						</div>
-					</div>
-					<div class="wm-controls-grid">
-						<div class="wm-control-field">
-							<label class="wm-control-label">{{ __("Position X") }}</label>
-							<div class="wm-input-group">
-								<input type="number" class="wm-input"
-									:value="Math.round(wm_pos_x * 10) / 10"
-									min="0" max="100" step="0.5"
-									@input="wm_set_pos_x(parseFloat($event.target.value))" />
-								<span class="wm-input-suffix">%</span>
-							</div>
-						</div>
-						<div class="wm-control-field">
-							<label class="wm-control-label">{{ __("Position Y") }}</label>
-							<div class="wm-input-group">
-								<input type="number" class="wm-input"
-									:value="Math.round(wm_pos_y * 10) / 10"
-									min="0" max="100" step="0.5"
-									@input="wm_set_pos_y(parseFloat($event.target.value))" />
-								<span class="wm-input-suffix">%</span>
-							</div>
-						</div>
-						<div class="wm-control-field">
-							<label class="wm-control-label">{{ __("Size") }}</label>
-							<div class="wm-input-group">
-								<input type="number" class="wm-input"
-									:value="Math.round(wm_size * 10) / 10"
-									min="5" max="100" step="1"
-									@input="wm_set_size(parseFloat($event.target.value))" />
-								<span class="wm-input-suffix">%</span>
-							</div>
-						</div>
-						<div class="wm-control-field">
-							<label class="wm-control-label">{{ __("Opacity") }}</label>
-							<div class="wm-input-group">
-								<input type="number" class="wm-input"
-									:value="wm_opacity"
-									min="5" max="100" step="1"
-									@input="wm_set_opacity(parseInt($event.target.value))" />
-								<span class="wm-input-suffix">%</span>
-							</div>
-						</div>
-					</div>
-				</template>
+			<!-- Watermark controls — only shown when Watermark is on. -->
+			<div v-if="show_watermark && wm_enabled" class="adjustments-row adjustments-row-wm">
+				<!-- Segmented tab control: Tiled first, Corner second. -->
+				<div class="segmented-tabs" role="tablist">
+					<button
+						class="segmented-tab"
+						:class="{ active: wm_mode === 'Tiled' }"
+						role="tab"
+						:aria-selected="wm_mode === 'Tiled'"
+						:title="__('Tiled — covers the whole image, not draggable')"
+						@click="wm_set_mode('Tiled')"
+					>
+						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+						{{ __("Tiled") }}
+					</button>
+					<button
+						class="segmented-tab"
+						:class="{ active: wm_mode === 'Corner' }"
+						role="tab"
+						:aria-selected="wm_mode === 'Corner'"
+						:title="__('Corner — single logo at a fixed position, draggable')"
+						@click="wm_set_mode('Corner')"
+					>
+						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L12 12"/><rect x="2" y="14" width="10" height="8" rx="1"/></svg>
+						{{ __("Corner") }}
+					</button>
+				</div>
 
 				<!-- Tiled mode controls -->
 				<template v-if="wm_mode === 'Tiled'">
@@ -143,46 +165,34 @@
 							<span class="wm-slider-value">{{ wm_tile_spacing }}%</span>
 						</div>
 					</div>
-					<div class="wm-controls-grid">
-						<div class="wm-control-field">
-							<label class="wm-control-label">{{ __("Tile Size") }}</label>
-							<div class="wm-input-group">
-								<input type="number" class="wm-input"
-									:value="Math.round(wm_tile_size)"
-									min="3" max="80" step="1"
-									@input="wm_set_tile_size(parseInt($event.target.value))" />
-								<span class="wm-input-suffix">%</span>
-							</div>
-						</div>
-						<div class="wm-control-field">
+				</template>
+
+				<!-- Corner mode controls -->
+				<template v-if="wm_mode === 'Corner'">
+					<div class="wm-sliders-row">
+						<div class="wm-slider-field">
 							<label class="wm-control-label">{{ __("Opacity") }}</label>
-							<div class="wm-input-group">
-								<input type="number" class="wm-input"
-									:value="wm_tile_opacity"
-									min="5" max="100" step="1"
-									@input="wm_set_tile_opacity(parseInt($event.target.value))" />
-								<span class="wm-input-suffix">%</span>
-							</div>
+							<input type="range" class="wm-slider" min="5" max="100"
+								:value="wm_opacity" @input="wm_set_opacity(parseInt($event.target.value))" />
+							<span class="wm-slider-value">{{ wm_opacity }}%</span>
 						</div>
-						<div class="wm-control-field">
-							<label class="wm-control-label">{{ __("Rotation") }}</label>
-							<div class="wm-input-group">
-								<input type="number" class="wm-input"
-									:value="wm_tile_rotation"
-									min="-180" max="180" step="1"
-									@input="wm_set_tile_rotation(parseInt($event.target.value))" />
-								<span class="wm-input-suffix">°</span>
-							</div>
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Size") }}</label>
+							<input type="range" class="wm-slider" min="5" max="100"
+								:value="wm_size" @input="wm_set_size(parseFloat($event.target.value))" />
+							<span class="wm-slider-value">{{ Math.round(wm_size) }}%</span>
 						</div>
-						<div class="wm-control-field">
-							<label class="wm-control-label">{{ __("Spacing") }}</label>
-							<div class="wm-input-group">
-								<input type="number" class="wm-input"
-									:value="wm_tile_spacing"
-									min="0" max="100" step="1"
-									@input="wm_set_tile_spacing(parseInt($event.target.value))" />
-								<span class="wm-input-suffix">%</span>
-							</div>
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Position X") }}</label>
+							<input type="range" class="wm-slider" min="0" max="100"
+								:value="wm_pos_x" @input="wm_set_pos_x(parseFloat($event.target.value))" />
+							<span class="wm-slider-value">{{ Math.round(wm_pos_x) }}%</span>
+						</div>
+						<div class="wm-slider-field">
+							<label class="wm-control-label">{{ __("Position Y") }}</label>
+							<input type="range" class="wm-slider" min="0" max="100"
+								:value="wm_pos_y" @input="wm_set_pos_y(parseFloat($event.target.value))" />
+							<span class="wm-slider-value">{{ Math.round(wm_pos_y) }}%</span>
 						</div>
 					</div>
 				</template>
@@ -196,9 +206,9 @@
 					</button>
 				</div>
 			</div>
-		</transition>
+		</div>
 
-		<div class="image-cropper-actions">
+		<div class="image-cropper-actions" ref="actions">
 			<div class="cropper-left-actions">
 				<div class="btn-group" v-if="fixed_aspect_ratio == null">
 					<button
@@ -265,7 +275,7 @@ export default {
 	name: "ImageCropper",
 	props: [
 		"file", "fixed_aspect_ratio",
-		"show_remove_bg", "remove_bg_checked",
+		"show_remove_bg", "remove_bg_checked", "remove_bg_padding_pct",
 		"show_watermark", "watermark_settings", "wm_default_enabled",
 	],
 	data() {
@@ -279,6 +289,18 @@ export default {
 			bg_processing: false,
 			original_file: null,
 			nobg_file: null,
+			// Auto-crop metadata from microservice (Phase 1). `nobg_bbox` is the
+			// non-transparent bounding box of the processed PNG; when present, the
+			// Cropper `ready` callback snaps the initial crop box to it plus the
+			// configured padding. Null means "no auto-crop" (legacy microservice
+			// response or Remove BG disabled) and Cropper falls back to default.
+			nobg_bbox: null,
+			nobg_natural_size: null,
+			// Local override for padding — starts as null (= use the prop from
+			// Image Processing Settings). When the user drags the padding slider
+			// in the Remove BG section, this takes effect and auto-crop is
+			// re-applied live.
+			local_padding_pct: null,
 			// Watermark
 			wm_enabled: false,
 			wm_loaded: false,
@@ -308,9 +330,11 @@ export default {
 		},
 	},
 	mounted() {
-		// Remove BG: cached files
+		// Remove BG: cached files + bbox metadata (Phase 1)
 		this.original_file = this.file._original_file || this.file.cropper_file;
 		this.nobg_file = this.file._nobg_file || null;
+		this.nobg_bbox = this.file._nobg_bbox || null;
+		this.nobg_natural_size = this.file._nobg_natural_size || null;
 		this.file._original_file = this.original_file;
 
 		if (this.remove_bg_checked && this.nobg_file) {
@@ -349,12 +373,58 @@ export default {
 		document.addEventListener("mouseup", this._on_mouseup);
 		document.addEventListener("touchmove", this._on_touchmove, { passive: false });
 		document.addEventListener("touchend", this._on_touchend);
+
+		// When the viewport or the modal itself resizes, the CropperJS canvas
+		// re-layouts automatically via its built-in listener, but our watermark
+		// overlay canvas sits on top and needs to be resized + redrawn manually.
+		// Debounce with rAF to coalesce rapid resize events.
+		this._on_window_resize = () => {
+			if (this._resize_raf) return;
+			this._resize_raf = requestAnimationFrame(() => {
+				this._resize_raf = null;
+				if (this.wm_enabled && this.wm_loaded) {
+					this.wm_resize_canvas();
+				}
+			});
+		};
+		window.addEventListener("resize", this._on_window_resize);
+
+		// Mark the enclosing Bootstrap modal-body so our scoped CSS can enable
+		// internal scrolling — otherwise very tall images + section cards push
+		// the modal past the viewport bottom. `$refs.wrapper` is inside the
+		// modal-body, so walking up finds it.
+		//
+		// The action bar (aspect ratio buttons, feature toggles, Back/Crop)
+		// uses `position: sticky; bottom: 0` inside the scrollable modal-body
+		// so it stays pinned at the visual bottom of the dialog regardless of
+		// how tall the image + parameter panel grow. The dialog's built-in
+		// modal-footer (with the file-selection stage's Set all private /
+		// Upload buttons) is hidden via the `.image-cropper-modal-body` class
+		// → [next] → `.modal-footer { display: none }` sibling selector so we
+		// don't show two rows of actions while cropping.
+		this.$nextTick(() => {
+			// Only apply the sticky-footer treatment when the cropper is
+			// mounted inside Frappe's FileUploader dialog. External
+			// consumers (any app that embeds <image-cropper> in its own
+			// page/dialog without the .file-uploader wrapper) keep their
+			// default modal-body + modal-footer layout untouched.
+			const body = this.$el.closest && this.$el.closest(".file-uploader .modal-body");
+			if (body) {
+				body.classList.add("image-cropper-modal-body");
+				this._modal_body_el = body;
+			}
+		});
 	},
 	beforeDestroy() {
 		document.removeEventListener("mousemove", this._on_mousemove);
 		document.removeEventListener("mouseup", this._on_mouseup);
 		document.removeEventListener("touchmove", this._on_touchmove);
 		document.removeEventListener("touchend", this._on_touchend);
+		window.removeEventListener("resize", this._on_window_resize);
+		if (this._resize_raf) cancelAnimationFrame(this._resize_raf);
+		if (this._modal_body_el) {
+			this._modal_body_el.classList.remove("image-cropper-modal-body");
+		}
 	},
 	computed: {
 		aspect_ratio_buttons() {
@@ -364,6 +434,14 @@ export default {
 				{ label: __("16:9"), value: 16 / 9 },
 				{ label: __("Free"), value: NaN },
 			];
+		},
+		// The padding actually applied by _apply_auto_crop. Local override wins
+		// if set, otherwise fall back to the prop from Image Processing Settings,
+		// then a hardcoded 5% default.
+		effective_padding_pct() {
+			if (this.local_padding_pct != null) return this.local_padding_pct;
+			const p = Number(this.remove_bg_padding_pct);
+			return Number.isFinite(p) ? p : 2;
 		},
 	},
 	methods: {
@@ -390,6 +468,19 @@ export default {
 					data: crop_box,
 					aspectRatio: this.aspect_ratio,
 					ready: () => {
+						// Phase 1 auto-crop: if Remove BG produced a bbox AND the
+						// user hasn't already saved a manual crop_box_data for this
+						// file, snap the initial crop box to bbox + padding.
+						// We respect crop_box_data because users who already tweaked
+						// the crop shouldn't have their work overwritten when the
+						// cropper re-mounts (e.g. after toggling Remove BG).
+						if (
+							this.bg_removed &&
+							this.nobg_bbox &&
+							!this.file.crop_box_data
+						) {
+							this._apply_auto_crop();
+						}
 						if (this.wm_enabled && this.wm_loaded) {
 							this.$nextTick(() => this.wm_resize_canvas());
 						}
@@ -401,6 +492,74 @@ export default {
 					},
 				});
 			};
+		},
+
+		// ── Auto-crop (Phase 1) ──
+		_apply_auto_crop() {
+			// Snap the Cropper crop box to the product's non-transparent bounding
+			// box plus a configurable padding. Called from the Cropper `ready`
+			// callback after a Remove BG result is loaded.
+			//
+			// Padding is a percentage of the LONGER side of the bbox (so wide or
+			// tall products both get a proportional border). Negative values
+			// tighten into the bbox to shed anti-aliasing halos. CropperJS clamps
+			// the final rectangle to the image bounds automatically.
+			if (!this.cropper || !this.nobg_bbox) return;
+			const { x, y, width, height } = this.nobg_bbox;
+			const padding_pct = this.effective_padding_pct;
+			const pad = (padding_pct / 100) * Math.max(width, height);
+			this.cropper.setData({
+				x: x - pad,
+				y: y - pad,
+				width: width + 2 * pad,
+				height: height + 2 * pad,
+			});
+		},
+
+		// ── Remove BG padding control (Phase 1 — live-edit from Remove BG card) ──
+		set_padding_pct(val) {
+			if (!Number.isFinite(val)) return;
+			// Clamp to slider bounds
+			this.local_padding_pct = Math.max(-20, Math.min(40, val));
+			if (this.bg_removed && this.nobg_bbox && this.cropper) {
+				this._apply_auto_crop();
+			}
+		},
+		reset_padding_pct() {
+			this.local_padding_pct = null;
+			if (this.bg_removed && this.nobg_bbox && this.cropper) {
+				this._apply_auto_crop();
+			}
+		},
+		async save_padding_default() {
+			// Persist the current padding as the system-wide default in Image
+			// Processing Settings. Mirrors wm_save_defaults. After save the
+			// prop baseline is updated in the cached settings so Reset clears
+			// the local override back to this new default instead of the old
+			// one.
+			const value = this.effective_padding_pct;
+			try {
+				await frappe.call({
+					method: "frappe.client.set_value",
+					args: {
+						doctype: "Image Processing Settings",
+						name: "Image Processing Settings",
+						fieldname: { remove_bg_padding_pct: value },
+					},
+				});
+				if (frappe._image_processing_settings_cache) {
+					frappe._image_processing_settings_cache.remove_bg_padding_pct = value;
+				}
+				frappe.show_alert({
+					message: __("Auto-crop padding default saved ({0}%)", [value]),
+					indicator: "green",
+				});
+			} catch (e) {
+				frappe.show_alert({
+					message: __("Failed to save default"),
+					indicator: "red",
+				});
+			}
 		},
 
 		// ── Crop ──
@@ -512,6 +671,12 @@ export default {
 					let blob = await blob_resp.blob();
 					this.nobg_file = new File([blob], "nobg.png", { type: "image/png" });
 					this.file._nobg_file = this.nobg_file;
+					// Phase 1: capture bbox + natural_size for auto-crop. Null when
+					// the microservice returned a legacy raw-PNG response.
+					this.nobg_bbox = (resp.message && resp.message.bbox) || null;
+					this.nobg_natural_size = (resp.message && resp.message.natural_size) || null;
+					this.file._nobg_bbox = this.nobg_bbox;
+					this.file._nobg_natural_size = this.nobg_natural_size;
 					this.bg_removed = true;
 					this.file.cropper_file = this.nobg_file;
 					this.file.file_obj = this.nobg_file;
@@ -593,11 +758,30 @@ export default {
 			ctx.drawImage(this.wm_img, r.x, r.y, r.w, r.h);
 			ctx.globalAlpha = 1.0;
 
-			ctx.strokeStyle = "rgba(59, 130, 246, 0.5)";
-			ctx.lineWidth = 1;
-			ctx.setLineDash([4, 4]);
+			// Outline hints the user that this rectangle is the draggable target.
+			// Solid + thicker when interaction is set to "Move watermark", dashed
+			// and thinner otherwise so it still marks the watermark without
+			// screaming "drag me" when the user is cropping.
+			const active = this.interaction_mode === "watermark";
+			ctx.strokeStyle = active ? "rgba(59, 130, 246, 0.9)" : "rgba(59, 130, 246, 0.5)";
+			ctx.lineWidth = active ? 2 : 1;
+			if (!active) ctx.setLineDash([4, 4]);
 			ctx.strokeRect(r.x, r.y, r.w, r.h);
 			ctx.setLineDash([]);
+			// Corner handles so the rectangle reads as "draggable" (only when
+			// interaction is active).
+			if (active) {
+				const handle = 6;
+				ctx.fillStyle = "rgba(59, 130, 246, 0.9)";
+				[
+					[r.x, r.y],
+					[r.x + r.w, r.y],
+					[r.x, r.y + r.h],
+					[r.x + r.w, r.y + r.h],
+				].forEach(([hx, hy]) => {
+					ctx.fillRect(hx - handle / 2, hy - handle / 2, handle, handle);
+				});
+			}
 		},
 		wm_draw_tiled(ctx, cd) {
 			const tile_w = (this.wm_tile_size / 100) * cd.width;
@@ -652,11 +836,19 @@ export default {
 					this.cropper.setDragMode("crop");
 				}
 			}
+			// Repaint watermark so the corner outline picks up the new active state.
+			if (this.wm_enabled && this.wm_loaded) {
+				this.$nextTick(() => this.wm_draw());
+			}
 		},
 
-		// Wrapper-level mouse/touch handlers — only active in watermark mode
+		// Wrapper-level mouse/touch handlers — only active in Corner-mode
+		// watermark interaction. Tiled watermark covers the whole image so
+		// there's no meaningful drag target; users adjust tile params via
+		// sliders instead.
 		on_wrapper_mousedown(e) {
 			if (this.interaction_mode !== "watermark") return;
+			if (this.wm_mode !== "Corner") return;
 			if (!this.wm_enabled || !this.wm_loaded || !this.cropper) return;
 			const canvas = this.$refs.wm_canvas;
 			if (!canvas) return;
@@ -688,6 +880,7 @@ export default {
 		},
 		on_wrapper_wheel(e) {
 			if (this.interaction_mode !== "watermark") return;
+			if (this.wm_mode !== "Corner") return;
 			if (!this.wm_enabled || !this.wm_loaded) return;
 			const delta = e.deltaY > 0 ? -1 : 1;
 			this.wm_size = Math.max(5, Math.min(100, this.wm_size + delta));
@@ -695,6 +888,7 @@ export default {
 		},
 		on_wrapper_touchstart(e) {
 			if (this.interaction_mode !== "watermark") return;
+			if (this.wm_mode !== "Corner") return;
 			if (!this.wm_enabled || !this.wm_loaded || !this.cropper) return;
 			const canvas = this.$refs.wm_canvas;
 			if (!canvas) return;
@@ -747,6 +941,11 @@ export default {
 		},
 		wm_set_mode(mode) {
 			this.wm_mode = mode;
+			// Tiled mode has no drag target — snap back to "Adjust crop box"
+			// interaction so the cursor + wrapper state stays consistent.
+			if (mode === "Tiled" && this.interaction_mode === "watermark") {
+				this.set_mode("crop");
+			}
 			this.wm_draw();
 		},
 		wm_set_tile_size(val) {
@@ -831,47 +1030,134 @@ export default {
 img {
 	display: block;
 	max-width: 100%;
-	max-height: 600px;
+	/* Cap the image so the whole cropper dialog (image + param cards + action
+	   bar + modal chrome) fits inside the viewport. The 420px budget leaves
+	   room for: modal header/footer (~120px), section cards (~220px when both
+	   open), action bar (~50px), and small margins. Fallback 600px keeps
+	   legacy behavior on very tall viewports where calc() overshoots. */
+	max-height: min(600px, calc(100vh - 420px));
 }
 
-/* ── Mode switcher ── */
-.mode-switcher {
+/* ── Unified Image Adjustments panel ──
+   A single bordered card hosting Remove BG padding + Watermark controls.
+   Each feature contributes a row only when its toggle is on. */
+.adjustments-panel {
+	margin-top: 12px;
+	padding: 14px 16px;
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	background: var(--fg-color, white);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.adjustments-row + .adjustments-row {
+	margin-top: 14px;
+	padding-top: 14px;
+	border-top: 1px solid var(--border-color);
+}
+
+.adjustments-field-label {
+	display: block;
+	margin: 0 0 6px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-color);
+	letter-spacing: 0.01em;
+}
+
+.adjustments-warn {
+	font-size: 12px;
+	color: var(--orange-600, #c2410c);
+	background: var(--orange-50, #fff7ed);
+	border: 1px solid var(--orange-200, #fed7aa);
+	border-radius: 6px;
+	padding: 8px 12px;
+}
+
+.padding-input-row {
 	display: flex;
-	margin-bottom: 8px;
-	background: var(--control-bg);
-	border-radius: 8px;
-	padding: 2px;
-	width: fit-content;
+	align-items: center;
+	gap: 12px;
 }
 
-.mode-btn {
+.padding-input-row .wm-slider {
+	flex: 1;
+}
+
+.padding-input-group {
+	width: 82px;
+	flex-shrink: 0;
+}
+
+/* ── Segmented tabs (used by Tiled/Corner + Drag on image switchers) ──
+   Selected tab is a solid primary-colored pill with a small shadow; the
+   unselected tab keeps its own fully-opaque surface (not transparent) so the
+   two states read as equally-present controls, just colored differently. */
+.segmented-tabs {
+	display: inline-flex;
+	padding: 3px;
+	background: var(--gray-100, #f3f4f6);
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	gap: 2px;
+}
+
+.segmented-tab {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
-	padding: 4px 14px;
+	gap: 6px;
+	padding: 6px 16px;
 	border: none;
 	border-radius: 6px;
 	font-size: var(--text-sm);
-	color: var(--text-muted);
+	font-weight: 500;
+	color: var(--text-color);
 	background: transparent;
 	cursor: pointer;
-	transition: all 0.15s ease;
+	transition: all 0.18s ease;
 	white-space: nowrap;
 }
 
-.mode-btn:hover {
-	color: var(--text-color);
+.segmented-tab svg {
+	opacity: 0.7;
+	transition: opacity 0.18s ease;
 }
 
-.mode-btn.active {
-	background: white;
-	color: var(--primary);
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+.segmented-tab:hover {
+	background: var(--gray-200, #e5e7eb);
 }
 
-.mode-btn.disabled {
-	opacity: 0.4;
-	cursor: not-allowed;
+.segmented-tab:hover svg {
+	opacity: 1;
+}
+
+.segmented-tab.active {
+	background: var(--primary);
+	color: white;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.segmented-tab.active svg {
+	opacity: 1;
+}
+
+.segmented-tab.active:hover {
+	background: var(--primary);
+}
+
+/* ── Interaction mode switcher (above image) ── */
+.interaction-switcher {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 10px;
+}
+
+.interaction-switcher-label {
+	font-size: 12px;
+	color: var(--text-muted);
+	font-weight: 500;
+	white-space: nowrap;
 }
 
 .cropper-image-wrapper {
@@ -882,6 +1168,19 @@ img {
 	cursor: move;
 }
 
+/* While Remove BG is running, hide CropperJS's own crop-box chrome so the
+   user sees just the plain image + loading overlay. The crop box is
+   meaningless during this ~10-second window (auto-crop will overwrite it
+   when the bbox arrives), and leaving it visible is a visual distraction. */
+.cropper-image-wrapper.bg-processing >>> .cropper-crop-box,
+.cropper-image-wrapper.bg-processing >>> .cropper-dashed,
+.cropper-image-wrapper.bg-processing >>> .cropper-line,
+.cropper-image-wrapper.bg-processing >>> .cropper-point,
+.cropper-image-wrapper.bg-processing >>> .cropper-face,
+.cropper-image-wrapper.bg-processing >>> .cropper-view-box {
+	display: none !important;
+}
+
 .watermark-overlay-canvas {
 	position: absolute;
 	top: 0;
@@ -890,17 +1189,32 @@ img {
 	pointer-events: none;
 }
 
+/* Sticky action bar at the bottom of the scrollable modal-body. Stays
+   visually pinned to the dialog footer edge regardless of content height.
+   Negative horizontal margins cancel the modal-body padding so the bar
+   spans full width and its border-top/shadow reach both edges. */
 .image-cropper-actions {
+	position: sticky;
+	bottom: 0;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	margin-top: var(--margin-md);
+	gap: 12px;
+	margin: 16px calc(var(--padding-lg, 20px) * -1) 0;
+	padding: 14px var(--padding-lg, 20px);
+	background: white;
+	border-top: 1px solid var(--border-color);
+	box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.04);
+	/* Must sit above .watermark-overlay-canvas (z-index: 5) so the
+	   canvas never bleeds through the sticky bar if the panel scrolls
+	   far enough for the image to overlap the bar vertically. */
+	z-index: 10;
 }
 
 .cropper-left-actions {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 10px;
 	flex-wrap: wrap;
 }
 
@@ -990,80 +1304,20 @@ img {
 }
 
 /* ── Watermark control panel ── */
-.wm-panel-enter-active,
-.wm-panel-leave-active {
-	transition: max-height 0.3s ease, opacity 0.25s ease;
-	overflow: hidden;
-}
-
-.wm-panel-enter,
-.wm-panel-leave-to {
-	max-height: 0;
-	opacity: 0;
-}
-
-.wm-panel-enter-to,
-.wm-panel-leave {
-	max-height: 220px;
-	opacity: 1;
-}
-
-.wm-mode-selector {
-	display: flex;
-	margin-bottom: 8px;
-	background: var(--bg-color);
-	border-radius: 6px;
-	padding: 2px;
-	width: fit-content;
-	border: 1px solid var(--border-color);
-}
-
-.wm-mode-btn {
-	padding: 3px 14px;
-	border: none;
-	border-radius: 4px;
-	font-size: var(--text-sm);
-	color: var(--text-muted);
-	background: transparent;
-	cursor: pointer;
-	transition: all 0.15s ease;
-}
-
-.wm-mode-btn:hover {
-	color: var(--text-color);
-}
-
-.wm-mode-btn.active {
-	background: white;
-	color: var(--primary);
-	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-}
-
-.wm-controls-panel {
-	margin-top: var(--margin-sm);
-	padding: 10px 12px;
-	background: var(--control-bg);
-	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-}
-
-.wm-controls-grid {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 6px 12px;
-}
-
-.wm-control-field {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
+/* .wm-mode-selector / .wm-mode-btn replaced by .segmented-tabs above.
+   The Tiled/Corner segmented control appears inside adjustments-row-wm. */
+.adjustments-row-wm .segmented-tabs {
+	margin-bottom: 12px;
 }
 
 .wm-control-label {
 	font-size: 11px;
+	font-weight: 500;
 	color: var(--text-muted);
-	margin: 0;
+	margin: 0 0 6px 0;
 	line-height: 1.4;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
 }
 
 .wm-input-group {
@@ -1109,18 +1363,23 @@ img {
 }
 
 .wm-sliders-row {
-	display: flex;
-	gap: 12px;
-	flex-wrap: wrap;
-	margin-bottom: 8px;
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 18px 28px;
+	margin-bottom: 12px;
 }
 
 .wm-slider-field {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
-	flex: 1;
-	min-width: 100px;
+	min-width: 0;
+}
+
+@media (max-width: 576px) {
+	.wm-sliders-row {
+		grid-template-columns: 1fr;
+		gap: 14px;
+	}
 }
 
 .wm-slider {
@@ -1128,11 +1387,14 @@ img {
 	height: 4px;
 	cursor: pointer;
 	accent-color: var(--primary);
+	margin: 2px 0;
 }
 
 .wm-slider-value {
+	margin-top: 4px;
 	font-size: 11px;
-	color: var(--text-muted);
+	font-weight: 500;
+	color: var(--text-color);
 	text-align: center;
 }
 
@@ -1162,22 +1424,13 @@ img {
 
 /* ── Mobile ── */
 @media (max-width: 576px) {
-	.wm-controls-grid {
-		grid-template-columns: 1fr;
-		gap: 6px;
+	/* Tighter image cap on small viewports so param cards still fit. */
+	img {
+		max-height: min(400px, calc(100vh - 360px));
 	}
 
-	.wm-controls-panel {
-		padding: 8px 10px;
-	}
-
-	.wm-opacity-row {
-		flex-wrap: wrap;
-	}
-
-	.wm-opacity-row .wm-control-label {
-		width: 100%;
-		min-width: unset;
+	.adjustments-panel {
+		padding: 12px;
 	}
 
 	.wm-panel-actions {
@@ -1193,20 +1446,36 @@ img {
 		gap: 4px;
 	}
 
-	.toggle-pill {
-		padding: 3px 8px;
-		font-size: 12px;
-	}
-
-	.mode-switcher {
+	.segmented-tabs {
 		width: 100%;
 	}
 
-	.mode-btn {
+	.segmented-tab {
 		flex: 1;
 		justify-content: center;
-		padding: 4px 10px;
+		padding: 6px 10px;
 		font-size: 12px;
 	}
+}
+</style>
+
+<!-- Global (non-scoped) styles: apply to .modal-body (which sits outside the
+     Vue component subtree) and to descendants of .image-cropper-modal-body.
+     Scoped styles wouldn't reach modal-body itself, and some descendant
+     rules (modal-footer sibling hide) need to bypass scoping too. -->
+<style>
+.modal-body.image-cropper-modal-body {
+	max-height: calc(100vh - 180px);
+	overflow-y: auto;
+	/* Remove the default modal-body bottom padding so the sticky action
+	   bar sits flush at the bottom edge with no visible gap. */
+	padding-bottom: 0 !important;
+}
+
+/* Hide the dialog's built-in footer (Set all private / Upload) while the
+   cropper is active. We use the sibling combinator from modal-body to
+   modal-footer because they share the same .modal-content parent. */
+.modal-body.image-cropper-modal-body + .modal-footer {
+	display: none !important;
 }
 </style>
