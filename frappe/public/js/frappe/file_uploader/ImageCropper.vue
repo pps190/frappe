@@ -403,7 +403,12 @@ export default {
 		// → [next] → `.modal-footer { display: none }` sibling selector so we
 		// don't show two rows of actions while cropping.
 		this.$nextTick(() => {
-			const body = this.$el.closest && this.$el.closest(".modal-body");
+			// Only apply the sticky-footer treatment when the cropper is
+			// mounted inside Frappe's FileUploader dialog. External
+			// consumers (any app that embeds <image-cropper> in its own
+			// page/dialog without the .file-uploader wrapper) keep their
+			// default modal-body + modal-footer layout untouched.
+			const body = this.$el.closest && this.$el.closest(".file-uploader .modal-body");
 			if (body) {
 				body.classList.add("image-cropper-modal-body");
 				this._modal_body_el = body;
@@ -1200,7 +1205,10 @@ img {
 	background: white;
 	border-top: 1px solid var(--border-color);
 	box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.04);
-	z-index: 3;
+	/* Must sit above .watermark-overlay-canvas (z-index: 5) so the
+	   canvas never bleeds through the sticky bar if the panel scrolls
+	   far enough for the image to overlap the bar vertically. */
+	z-index: 10;
 }
 
 .cropper-left-actions {

@@ -810,6 +810,15 @@ export default {
 	border-color: var(--primary);
 }
 
+/* Keyboard focus ring for the switch pill. The pill is role="switch"
+   with tabindex=0 so users without a mouse reach it through the tab
+   order; without this rule they'd see no focus cue at all and never
+   know they can press Space to toggle. */
+.footer-toggle .footer-toggle-pill:focus-visible {
+	outline: 2px solid var(--primary);
+	outline-offset: 2px;
+}
+
 .footer-toggle .footer-toggle-pill.active {
 	color: var(--primary);
 	background: var(--control-bg);

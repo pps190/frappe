@@ -204,9 +204,20 @@ export default class FileUploader {
 		// frappe.confirm dialog that shows the reason and asks whether to jump
 		// to the admin settings page.
 		const disabled = !!disabled_hint;
+		// A11y — the pill is functionally a switch, not a plain div.
+		// Exposing role="switch" + aria-checked + tabindex + keyboard
+		// activation makes it reachable and operable via keyboard and
+		// readable by screen readers. Disabled pills mark themselves
+		// with aria-disabled + aria-label carrying the reason so AT
+		// users hear the "why" without clicking the ⓘ.
+		const pill_aria = disabled
+			? `role="switch" aria-checked="false" aria-disabled="true" aria-label="${frappe.utils.escape_html(
+				`${label} — ${disabled_hint}`
+			)}" tabindex="-1"`
+			: `role="switch" aria-checked="${initial_active ? "true" : "false"}" tabindex="0" aria-label="${frappe.utils.escape_html(label)}"`;
 		const $toggle = $(`
 			<div class="footer-toggle" data-key="${key}">
-				<div class="footer-toggle-pill ${disabled ? "is-disabled" : (initial_active ? "active" : "")}">
+				<div class="footer-toggle-pill ${disabled ? "is-disabled" : (initial_active ? "active" : "")}" ${pill_aria}>
 					<span class="footer-toggle-label">${label}</span>
 					<span class="footer-toggle-switch">
 						<span class="footer-toggle-track ${!disabled && initial_active ? "on" : ""}">
@@ -240,17 +251,29 @@ export default class FileUploader {
 				});
 			});
 		} else {
-			$toggle.on("click", () => {
+			const $pill = $toggle.find(".footer-toggle-pill");
+			const $track = $toggle.find(".footer-toggle-track");
+			const flip = () => {
 				this.uploader[uploader_field] = !this.uploader[uploader_field];
 				const active = this.uploader[uploader_field];
-				$toggle.find(".footer-toggle-pill").toggleClass("active", active);
-				$toggle.find(".footer-toggle-track").toggleClass("on", active);
+				$pill.toggleClass("active", active).attr("aria-checked", active ? "true" : "false");
+				$track.toggleClass("on", active);
+			};
+			$toggle.on("click", flip);
+			// Keyboard activation — role="switch" should respond to
+			// Space and Enter. Without this the pill is focusable but
+			// can't be toggled without a mouse.
+			$pill.on("keydown", (e) => {
+				if (e.key === " " || e.key === "Enter") {
+					e.preventDefault();
+					flip();
+				}
 			});
 
 			// Sync when uploader state changes (e.g. from ImageCropper)
 			this.uploader.$watch(uploader_field, (val) => {
-				$toggle.find(".footer-toggle-pill").toggleClass("active", val);
-				$toggle.find(".footer-toggle-track").toggleClass("on", val);
+				$pill.toggleClass("active", val).attr("aria-checked", val ? "true" : "false");
+				$track.toggleClass("on", val);
 			});
 		}
 	}
