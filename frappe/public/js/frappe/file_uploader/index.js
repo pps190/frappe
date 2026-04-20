@@ -26,6 +26,8 @@ export default class FileUploader {
 		remove_bg_padding_pct,
 		show_watermark,
 		watermark_settings,
+		show_resize,
+		resize_settings,
 	} = {}) {
 		frm && frm.attachments.max_reached(true);
 		this.show_remove_bg = show_remove_bg;
@@ -34,6 +36,8 @@ export default class FileUploader {
 		this.remove_bg_padding_pct = remove_bg_padding_pct;
 		this.show_watermark = show_watermark;
 		this.watermark_settings = watermark_settings;
+		this.show_resize = show_resize;
+		this.resize_settings = resize_settings;
 
 		if (!wrapper) {
 			this.make_dialog(dialog_title);
@@ -66,6 +70,8 @@ export default class FileUploader {
 						remove_bg_padding_pct,
 						show_watermark,
 						watermark_settings,
+						show_resize,
+						resize_settings,
 					},
 				}),
 		});

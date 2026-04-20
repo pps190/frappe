@@ -62,9 +62,62 @@
 		     Watermark) live in the sticky dialog footer; this panel only hosts
 		     the parameters for whichever features are currently on. -->
 		<div
-			v-if="(show_remove_bg && bg_removed && nobg_bbox) || (show_watermark && wm_enabled)"
+			v-if="(show_remove_bg && bg_removed && nobg_bbox) || (show_watermark && wm_enabled) || (show_resize && resize_enabled)"
 			class="adjustments-panel"
 		>
+			<!-- Output Shape (FIRST in list per UX spec) — aspect, mode, fill,
+			     flatten. Only shown when the Output Shape toggle pill is on. -->
+			<div
+				v-if="show_resize && resize_enabled"
+				class="adjustments-row adjustments-row-resize"
+			>
+				<label class="adjustments-field-label">
+					{{ __("Output Shape") }}
+					<span class="adjustments-field-hint">
+						{{ __("Aspect normalization baked on Crop. Never upscales.") }}
+					</span>
+				</label>
+				<div class="resize-tabs-row">
+					<span class="resize-sublabel">{{ __("Aspect") }}</span>
+					<div class="segmented-tabs" role="tablist">
+						<button
+							v-for="a in aspect_ratio_options"
+							:key="a"
+							class="segmented-tab"
+							:class="{ active: resize_aspect === a }"
+							@click="resize_aspect = a"
+						>{{ a }}</button>
+					</div>
+				</div>
+				<div class="resize-tabs-row">
+					<span class="resize-sublabel">{{ __("Mode") }}</span>
+					<div class="segmented-tabs" role="tablist">
+						<button
+							v-for="m in resize_mode_options"
+							:key="m"
+							class="segmented-tab"
+							:class="{ active: resize_mode === m, disabled: resize_aspect === 'Free' }"
+							:disabled="resize_aspect === 'Free'"
+							@click="resize_mode = m"
+						>{{ __(m) }}</button>
+					</div>
+				</div>
+				<div class="resize-misc-row">
+					<label class="resize-inline-field">
+						<span>{{ __("Fill") }}</span>
+						<input
+							type="color"
+							class="resize-color"
+							v-model="resize_fill_color"
+						/>
+					</label>
+					<label class="resize-inline-toggle">
+						<input type="checkbox" v-model="resize_flatten_rgb" />
+						<span>{{ __("Flatten RGB") }}</span>
+					</label>
+				</div>
+			</div>
+
 			<!-- Auto-crop padding (Remove BG) — only shown when Remove BG is on
 			     AND a bbox is available. -->
 			<div
@@ -252,6 +305,25 @@
 						</span>
 					</span>
 				</div>
+				<div
+					v-if="show_resize"
+					class="toggle-pill"
+					:class="{ active: resize_enabled }"
+					@click="resize_enabled = !resize_enabled"
+					:title="__('Normalize output aspect ({0}, {1})', [resize_aspect, resize_mode])"
+				>
+					<span class="toggle-pill-label">
+						{{ __("Output Shape") }}
+						<span v-if="resize_enabled" class="toggle-pill-sublabel">
+							{{ resize_aspect }}
+						</span>
+					</span>
+					<span class="toggle-pill-switch">
+						<span class="toggle-pill-track" :class="{ on: resize_enabled }">
+							<span class="toggle-pill-thumb"></span>
+						</span>
+					</span>
+				</div>
 			</div>
 			<div>
 				<button
@@ -277,6 +349,8 @@ export default {
 		"file", "fixed_aspect_ratio",
 		"show_remove_bg", "remove_bg_checked", "remove_bg_padding_pct",
 		"show_watermark", "watermark_settings", "wm_default_enabled",
+		// Output Shape (new 2026-04) — from Image Processing Settings via item.js
+		"show_resize", "resize_settings",
 	],
 	data() {
 		return {
@@ -320,6 +394,17 @@ export default {
 			wm_tile_spacing: 40,
 			// Interaction mode
 			interaction_mode: "crop",
+			// Output Shape (new 2026-04) — baked into the final cropped canvas
+			// before upload. Same logic as the server-side PIL helper in
+			// item_image_batch.py::_apply_aspect_normalize.
+			resize_enabled: false,
+			resize_aspect: "1:1",
+			resize_mode: "Contain",
+			resize_fill_color: "#FFFFFF",
+			resize_flatten_rgb: true,
+			max_file_size_kb: 2048,
+			aspect_ratio_options: ["1:1", "4:3", "16:9", "3:2", "2:3", "Free"],
+			resize_mode_options: ["Contain", "Cover", "Stretch"],
 		};
 	},
 	watch: {
@@ -362,6 +447,16 @@ export default {
 			this.wm_tile_rotation = this.watermark_settings.tile_rotation != null ? this.watermark_settings.tile_rotation : -30;
 			this.wm_tile_spacing = this.watermark_settings.tile_spacing || 40;
 			this.load_watermark_image(this.watermark_settings.watermark_image);
+		}
+
+		// Output Shape: load settings (new 2026-04)
+		if (this.show_resize && this.resize_settings) {
+			this.resize_enabled = !!this.resize_settings.resize_enabled;
+			this.resize_aspect = this.resize_settings.resize_aspect || "1:1";
+			this.resize_mode = this.resize_settings.resize_mode || "Contain";
+			this.resize_fill_color = this.resize_settings.resize_fill_color || "#FFFFFF";
+			this.resize_flatten_rgb = !!this.resize_settings.resize_flatten_rgb;
+			this.max_file_size_kb = this.resize_settings.max_file_size_kb || 2048;
 		}
 
 		// Global listeners for watermark drag
@@ -619,15 +714,148 @@ export default {
 				}
 			}
 
-			const file_type = (this.bg_removed || this.wm_enabled) ? "image/png" : this.file.file_obj.type;
-			canvas.toBlob((blob) => {
+			// ── Output Shape step (new 2026-04) ──
+			// Apply aspect normalization + optional RGB flatten to a fresh
+			// canvas that mirrors the server-side PIL helper in
+			// item_image_batch.py::_apply_aspect_normalize. Happens AFTER the
+			// watermark composite (so comments / watermark stay on product
+			// content, not on Contain-padded fill strips).
+			let final_canvas = canvas;
+			if (this.show_resize && this.resize_enabled) {
+				final_canvas = this._apply_output_shape(canvas);
+			}
+
+			// Pick a type: flatten → JPEG (smaller, opaque); otherwise PNG
+			// when Remove BG or Watermark was applied (needs alpha or we
+			// have pixels that don't match the source type).
+			let file_type;
+			if (this.show_resize && this.resize_enabled && this.resize_flatten_rgb) {
+				file_type = "image/jpeg";
+			} else if (this.bg_removed || this.wm_enabled) {
+				file_type = "image/png";
+			} else {
+				file_type = this.file.file_obj.type;
+			}
+
+			final_canvas.toBlob((blob) => {
 				let name = this.file.name;
 				if (this.bg_removed) name = name.replace(/\.[^.]+$/, "_nobg.png");
 				if (this.wm_enabled) name = name.replace(/\.[^.]+$/, "_wm.png");
+				if (this.show_resize && this.resize_enabled) {
+					const ext = file_type === "image/jpeg" ? ".jpg" : ".png";
+					name = name.replace(/\.[^.]+$/, "_shape" + ext);
+				}
 				this.file.file_obj = new File([blob], name, { type: blob.type });
 				this.file.name = name;
 				this.$emit("toggle_image_cropper");
-			}, file_type);
+			}, file_type, file_type === "image/jpeg" ? 0.92 : undefined);
+		},
+
+		// Aspect-normalize a canvas via Canvas 2D. Mirrors the server-side
+		// _apply_aspect_normalize in item_image_batch.py so the baked file
+		// from a single-image upload and from a batch process look the same.
+		_apply_output_shape(src_canvas) {
+			const aspect_map = {
+				"1:1": [1, 1],
+				"4:3": [4, 3],
+				"16:9": [16, 9],
+				"3:2": [3, 2],
+				"2:3": [2, 3],
+			};
+
+			const aspect = this.resize_aspect;
+			const mode = this.resize_mode;
+			const sw = src_canvas.width;
+			const sh = src_canvas.height;
+
+			// Free or unknown → pass-through (optionally flatten)
+			if (aspect === "Free" || !(aspect in aspect_map)) {
+				return this._maybe_flatten(src_canvas, sw, sh, src_canvas);
+			}
+
+			const [tw, th] = aspect_map[aspect];
+			const src_ratio = sw / sh;
+			const tgt_ratio = tw / th;
+
+			if (Math.abs(src_ratio - tgt_ratio) < 1e-3) {
+				return this._maybe_flatten(src_canvas, sw, sh, src_canvas);
+			}
+
+			if (mode === "Stretch") {
+				let new_w, new_h;
+				if (src_ratio > tgt_ratio) {
+					new_w = sw;
+					new_h = Math.round(sw / tgt_ratio);
+				} else {
+					new_w = Math.round(sh * tgt_ratio);
+					new_h = sh;
+				}
+				const out = document.createElement("canvas");
+				out.width = new_w;
+				out.height = new_h;
+				out.getContext("2d").drawImage(src_canvas, 0, 0, new_w, new_h);
+				return this._maybe_flatten(out, new_w, new_h, out);
+			}
+
+			if (mode === "Cover") {
+				let new_w, new_h, off_x = 0, off_y = 0;
+				if (src_ratio > tgt_ratio) {
+					// Source wider — crop left/right
+					new_w = Math.round(sh * tgt_ratio);
+					new_h = sh;
+					off_x = Math.floor((sw - new_w) / 2);
+				} else {
+					// Source taller — crop top/bottom
+					new_w = sw;
+					new_h = Math.round(sw / tgt_ratio);
+					off_y = Math.floor((sh - new_h) / 2);
+				}
+				const out = document.createElement("canvas");
+				out.width = new_w;
+				out.height = new_h;
+				out.getContext("2d").drawImage(
+					src_canvas,
+					off_x, off_y, new_w, new_h,
+					0, 0, new_w, new_h,
+				);
+				return this._maybe_flatten(out, new_w, new_h, out);
+			}
+
+			// Contain: expand shorter axis, pad with fill color.
+			let canvas_w, canvas_h;
+			if (src_ratio > tgt_ratio) {
+				canvas_w = sw;
+				canvas_h = Math.round(sw / tgt_ratio);
+			} else {
+				canvas_w = Math.round(sh * tgt_ratio);
+				canvas_h = sh;
+			}
+			const out = document.createElement("canvas");
+			out.width = canvas_w;
+			out.height = canvas_h;
+			const ctx = out.getContext("2d");
+			// Fill the padding area first — transparent if flatten is off,
+			// or fill color if flatten is on so the composite is opaque.
+			if (this.resize_flatten_rgb) {
+				ctx.fillStyle = this.resize_fill_color || "#FFFFFF";
+				ctx.fillRect(0, 0, canvas_w, canvas_h);
+			}
+			const paste_x = Math.floor((canvas_w - sw) / 2);
+			const paste_y = Math.floor((canvas_h - sh) / 2);
+			ctx.drawImage(src_canvas, paste_x, paste_y);
+			return this._maybe_flatten(out, canvas_w, canvas_h, out);
+		},
+
+		_maybe_flatten(maybe_rgba_canvas, w, h, src_canvas) {
+			if (!this.resize_flatten_rgb) return maybe_rgba_canvas;
+			const out = document.createElement("canvas");
+			out.width = w;
+			out.height = h;
+			const ctx = out.getContext("2d");
+			ctx.fillStyle = this.resize_fill_color || "#FFFFFF";
+			ctx.fillRect(0, 0, w, h);
+			ctx.drawImage(src_canvas, 0, 0);
+			return out;
 		},
 
 		// ── Remove BG ──
@@ -1456,6 +1684,75 @@ img {
 		padding: 6px 10px;
 		font-size: 12px;
 	}
+}
+
+/* Output Shape section — lives in the adjustments panel. Same visual
+   language as the watermark tabs but with an extra `sublabel` column. */
+.adjustments-row-resize {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.adjustments-field-hint {
+	font-weight: 400;
+	color: #7f8ea3;
+	font-size: 11px;
+	margin-left: 6px;
+}
+.resize-tabs-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+.resize-sublabel {
+	min-width: 52px;
+	font-size: 12px;
+	color: #606266;
+}
+.resize-misc-row {
+	display: flex;
+	gap: 14px;
+	align-items: center;
+	flex-wrap: wrap;
+	padding-left: 52px;
+}
+.resize-inline-field {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: #606266;
+}
+.resize-color {
+	width: 28px;
+	height: 24px;
+	padding: 0;
+	border: 1px solid #cbd5e1;
+	border-radius: 4px;
+	cursor: pointer;
+	background: transparent;
+}
+.resize-inline-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: #606266;
+	cursor: pointer;
+}
+.toggle-pill-sublabel {
+	font-size: 10px;
+	color: rgba(255, 255, 255, 0.85);
+	margin-left: 4px;
+	padding: 1px 4px;
+	background: rgba(0, 0, 0, 0.18);
+	border-radius: 6px;
+	font-weight: 500;
+}
+.segmented-tab.disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 </style>
 

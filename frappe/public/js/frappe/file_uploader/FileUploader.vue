@@ -224,6 +224,8 @@
 			:show_watermark="show_watermark"
 			:watermark_settings="watermark_settings"
 			:wm_default_enabled="wm_enabled"
+			:show_resize="show_resize"
+			:resize_settings="resize_settings"
 			@toggle_image_cropper="toggle_image_cropper(-1)"
 			@upload_after_crop="trigger_upload = true"
 			@remove_bg_changed="remove_bg_checked = $event"
@@ -311,6 +313,14 @@ export default {
 			default: false,
 		},
 		watermark_settings: {
+			default: null,
+		},
+		// Output Shape (new 2026-04) — aspect normalization applied at
+		// Crop time. Mirror of Image Processing Settings' resize_* fields.
+		show_resize: {
+			default: false,
+		},
+		resize_settings: {
 			default: null,
 		},
 	},
