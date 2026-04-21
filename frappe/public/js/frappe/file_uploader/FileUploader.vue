@@ -3,6 +3,7 @@
 		class="file-uploader"
 		:class="{
 			'fu-with-panel': any_feature_shown && !show_image_cropper && !show_file_browser && !show_web_link,
+			'fu-cropper-mode': show_image_cropper,
 		}"
 		@dragover.prevent="dragover"
 		@dragleave.prevent="dragleave"
@@ -2166,9 +2167,20 @@ export default {
 	flex-direction: column;
 }
 /* When the ImageCropper mounts, its .cropper-grid should fill the body so
-   the left column can distribute height (toolbar / image / preview). */
-.file-uploader-dialog .modal-body > .file-uploader { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.file-uploader-dialog .modal-body > .file-uploader > .cropper-grid { flex: 1 1 auto; min-height: 0; }
+   the left column can distribute height (toolbar / image / preview).
+   Scoped to .fu-cropper-mode so it doesn't override the Step 1/3 grid
+   layout (.fu-with-panel uses display: grid, and a blanket flex-column
+   rule on .file-uploader would beat that specificity). */
+.file-uploader-dialog .modal-body > .file-uploader.fu-cropper-mode {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+.file-uploader-dialog .modal-body > .file-uploader.fu-cropper-mode > .cropper-grid {
+	flex: 1 1 auto;
+	min-height: 0;
+}
 /* Footer region — standard-actions holds the primary Upload button,
    custom-actions holds the feature toggles (Watermark / Remove BG
    pills). Space them properly so they don't collide, and wrap on
