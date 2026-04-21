@@ -3623,13 +3623,40 @@ img {
 
 /* Element UI's <el-image> mounts its image-viewer lightbox at
    document.body — it's not inside the Vue subtree so scoped styles
-   can't reach it. Bootstrap's modal uses z-index: 1055, so without
-   this bump the viewer opens UNDERNEATH the upload dialog and the
-   user can't interact with it. */
+   can't reach it. These rules apply globally and fix two issues:
+
+   1) z-index: the viewer defaults below Bootstrap's modal (1055)
+      so it opens UNDERNEATH the upload dialog. Bump to 2050.
+
+   2) Transparent PNG readability: by default the viewer shows the
+      image on a translucent dark mask — transparent pixels become
+      dark mask + whatever shows through. For product photos with
+      Remove BG, that makes edges hard to see against the backdrop.
+      Fix: OPAQUE dark mask (can't see through to the page below),
+      and a CHECKERBOARD background behind the image element so
+      the user can tell image pixels from transparent ones.
+      Same industry pattern as Photoshop / Figma / Photopea
+      "full-size transparent view". */
 .el-image-viewer__wrapper {
 	z-index: 2050 !important;
 }
 .el-image-viewer__mask {
 	z-index: 2049 !important;
+	background: #0f172a !important;   /* opaque slate-900 */
+	opacity: 1 !important;
+}
+.el-image-viewer__canvas .el-image-viewer__img {
+	/* Checkerboard baked into the img element's background so PNG
+	   transparency is distinguishable from the mask behind it. */
+	background-color: #ffffff;
+	background-image:
+		linear-gradient(45deg, #d1d5db 25%, transparent 25%),
+		linear-gradient(-45deg, #d1d5db 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #d1d5db 75%),
+		linear-gradient(-45deg, transparent 75%, #d1d5db 75%);
+	background-size: 20px 20px;
+	background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+	border-radius: 4px;
 }
 </style>
