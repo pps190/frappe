@@ -83,13 +83,13 @@
 						<canvas
 							ref="preview_canvas"
 							class="cropper-preview-canvas"
-							:class="{ 'el-image-backed': !!_preview_data_url }"
+							:class="{ 'el-image-backed': !!preview_data_url }"
 						></canvas>
 						<el-image
-							v-if="_preview_data_url"
+							v-if="preview_data_url"
 							class="cropper-preview-elimage"
-							:src="_preview_data_url"
-							:preview-src-list="[_preview_data_url]"
+							:src="preview_data_url"
+							:preview-src-list="[preview_data_url]"
 							fit="contain"
 						/>
 					</template>
@@ -730,7 +730,7 @@ export default {
 			// Full-resolution data URL fed into <el-image> preview-src-list.
 			// Updated on every preview render so clicking the thumb
 			// always opens the current state of the pipeline.
-			_preview_data_url: null,
+			preview_data_url: null,
 			_preview_debounce: null,
 			// Comments (new 2026-04) — list of text overlays baked into
 			// the final Canvas composite. Overlay DOM boxes on top of the
@@ -804,16 +804,16 @@ export default {
 			// _schedule_preview_update is debounced (120ms) + cropper may
 			// still be swapping the underlying image — without this reset
 			// the user could briefly see the old Remove BG state.
-			this._preview_data_url = null;
+			this.preview_data_url = null;
 			this._schedule_preview_update();
 		},
 		bg_processing(processing) {
 			// Clear the preview while bg removal is in flight so
 			// _render_preview doesn't snapshot an inconsistent
-			// intermediate state (and _preview_data_url-based v-if gates
+			// intermediate state (and preview_data_url-based v-if gates
 			// the el-image + canvas.el-image-backed behavior).
 			if (processing) {
-				this._preview_data_url = null;
+				this.preview_data_url = null;
 			} else {
 				// When processing flips off, cropper.swap() has just
 				// bound the new image. Wait a tick for cropper's
@@ -1917,10 +1917,10 @@ export default {
 			try {
 				const flatten = this.show_resize && this.resize_enabled && this.resize_flatten_rgb;
 				const fmt = flatten ? "image/jpeg" : "image/png";
-				this._preview_data_url = final_canvas.toDataURL(fmt, 0.88);
+				this.preview_data_url = final_canvas.toDataURL(fmt, 0.88);
 			} catch (e) {
 				// toDataURL can throw on huge canvases; fall back to null
-				this._preview_data_url = null;
+				this.preview_data_url = null;
 			}
 		},
 
