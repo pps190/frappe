@@ -273,270 +273,293 @@
 				</div>
 			</template>
 
-			<!-- Step 1 (no files yet): interactive 4-tab panel — full
-			     editable params, mirroring the cropper's right panel so
-			     users can set their defaults before picking a file. -->
+			<!-- Step 1 (no files yet): interactive 4-tab panel — reuses
+			     the cropper's existing .cropper-feature-tabs / .cropper-tab-*
+			     / .wm-slider-row / .segmented-tabs / .wm-panel-actions classes
+			     so Step 1 and Step 2 are visually identical, driven by ONE
+			     stylesheet. -->
 			<template v-else>
-				<div class="fu-feature-tabs" role="tablist">
+				<div class="cropper-feature-tabs" role="tablist">
 					<button
 						v-for="tab in available_tabs"
 						:key="tab.key"
 						type="button"
-						class="fu-feature-tab"
+						class="cropper-feature-tab"
 						:class="{ active: active_tab === tab.key }"
 						role="tab"
 						:aria-selected="active_tab === tab.key"
 						@click.stop.prevent="_switch_tab(tab.key)"
 					>
-						<span class="fu-feature-tab-label">{{ tab.label }}</span>
-						<span class="fu-feature-tab-state" :class="tab.on ? 'on' : 'off'">
-							<span class="fu-feature-tab-dot"></span>
+						<span class="cropper-feature-tab-label">{{ tab.label }}</span>
+						<span class="cropper-feature-tab-state" :class="tab.on ? 'on' : 'off'">
+							<span class="cropper-feature-tab-dot"></span>
 							{{ tab.on ? __("on") : __("off") }}
 						</span>
 					</button>
 				</div>
 
-				<div class="fu-tab-body">
+				<div class="cropper-tab-body">
 					<!-- ── REMOVE BG pane ── -->
-					<div v-show="active_tab === 'remove_bg'" class="fu-tab-pane">
-						<div class="fu-tab-enable">
-							<span class="fu-tab-enable-label">{{ __("Enable Remove Background") }}</span>
+					<div v-show="active_tab === 'remove_bg'" class="cropper-tab-pane">
+						<div class="cropper-tab-enable">
+							<span class="cropper-tab-enable-label">{{ __("Enable Remove Background") }}</span>
 							<div
-								class="fu-toggle-pill"
+								class="toggle-pill toggle-pill-compact"
 								:class="{ active: remove_bg_checked, 'is-disabled': !!remove_bg_disabled_hint }"
 								@click="!remove_bg_disabled_hint && (remove_bg_checked = !remove_bg_checked)"
 							>
-								<span class="fu-toggle-track" :class="{ on: remove_bg_checked && !remove_bg_disabled_hint }">
-									<span class="fu-toggle-thumb"></span>
+								<span class="toggle-pill-switch">
+									<span class="toggle-pill-track" :class="{ on: remove_bg_checked && !remove_bg_disabled_hint }">
+										<span class="toggle-pill-thumb"></span>
+									</span>
 								</span>
 							</div>
 						</div>
-						<div v-if="remove_bg_disabled_hint" class="fu-tab-note">
+						<div v-if="remove_bg_disabled_hint" class="adjustments-row adjustments-warn">
 							{{ remove_bg_disabled_hint }}
 							<a v-if="remove_bg_disabled_link" :href="remove_bg_disabled_link">{{ __("Configure") }}</a>
 						</div>
-						<template v-else>
-							<div class="fu-slider-row">
-								<label class="fu-slider-label">{{ __("Auto-crop padding") }}</label>
-								<input type="range" class="fu-slider" min="-20" max="40" step="1"
+						<div v-else-if="remove_bg_checked" class="adjustments-row">
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Auto-crop padding") }}</label>
+								<input type="range" class="wm-slider" min="-20" max="40" step="1"
 									:value="step1_padding_pct"
 									@input="step1_padding_pct = parseInt($event.target.value)" />
-								<span class="fu-slider-value">{{ step1_padding_pct }}%</span>
+								<span class="wm-slider-value">{{ step1_padding_pct }}%</span>
 							</div>
-						</template>
+							<div class="wm-panel-actions">
+								<button class="btn btn-xs btn-default" @click="_reset_bg_default">{{ __("Reset") }}</button>
+								<button class="btn btn-xs btn-primary-light" @click="_save_bg_default">{{ __("Save as Default") }}</button>
+							</div>
+						</div>
 					</div>
 
 					<!-- ── WATERMARK pane ── -->
-					<div v-show="active_tab === 'watermark'" class="fu-tab-pane">
-						<div class="fu-tab-enable">
-							<span class="fu-tab-enable-label">{{ __("Enable Watermark") }}</span>
+					<div v-show="active_tab === 'watermark'" class="cropper-tab-pane">
+						<div class="cropper-tab-enable">
+							<span class="cropper-tab-enable-label">{{ __("Enable Watermark") }}</span>
 							<div
-								class="fu-toggle-pill"
+								class="toggle-pill toggle-pill-compact"
 								:class="{ active: wm_enabled, 'is-disabled': !local_watermark_settings || !local_watermark_settings.watermark_image }"
 								@click="(local_watermark_settings && local_watermark_settings.watermark_image) && (wm_enabled = !wm_enabled)"
 							>
-								<span class="fu-toggle-track" :class="{ on: wm_enabled }">
-									<span class="fu-toggle-thumb"></span>
+								<span class="toggle-pill-switch">
+									<span class="toggle-pill-track" :class="{ on: wm_enabled }">
+										<span class="toggle-pill-thumb"></span>
+									</span>
 								</span>
 							</div>
 						</div>
-						<div v-if="!local_watermark_settings || !local_watermark_settings.watermark_image" class="fu-tab-note">
+						<div v-if="!local_watermark_settings || !local_watermark_settings.watermark_image" class="adjustments-row adjustments-warn">
 							{{ __("No watermark image uploaded.") }}
 							<a href="/app/watermark-settings">{{ __("Configure") }}</a>
 						</div>
-						<template v-else-if="wm_enabled">
-							<div class="fu-tab-field">
-								<label class="fu-tab-field-label">{{ __("Mode") }}</label>
-								<div class="fu-seg-row">
-									<button type="button" class="fu-seg-btn"
-										:class="{ active: (local_watermark_settings.mode || 'Tiled') === 'Tiled' }"
-										@click="_set_wm_field('mode', 'Tiled')">{{ __("Tiled") }}</button>
-									<button type="button" class="fu-seg-btn"
-										:class="{ active: local_watermark_settings.mode === 'Corner' }"
-										@click="_set_wm_field('mode', 'Corner')">{{ __("Corner") }}</button>
-								</div>
+						<div v-else-if="wm_enabled" class="adjustments-row adjustments-row-wm">
+							<div class="segmented-tabs" role="tablist">
+								<button type="button" class="segmented-tab"
+									:class="{ active: (local_watermark_settings.mode || 'Tiled') === 'Tiled' }"
+									@click="_set_wm_field('mode', 'Tiled')">
+									<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+									{{ __("Tiled") }}
+								</button>
+								<button type="button" class="segmented-tab"
+									:class="{ active: local_watermark_settings.mode === 'Corner' }"
+									@click="_set_wm_field('mode', 'Corner')">
+									<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L12 12"/><rect x="2" y="14" width="10" height="8" rx="1"/></svg>
+									{{ __("Corner") }}
+								</button>
 							</div>
 							<template v-if="(local_watermark_settings.mode || 'Tiled') === 'Tiled'">
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Opacity") }}</label>
-									<input type="range" class="fu-slider" min="5" max="100"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Opacity") }}</label>
+									<input type="range" class="wm-slider" min="5" max="100"
 										:value="local_watermark_settings.tile_opacity || 12"
 										@input="_set_wm_field('tile_opacity', parseInt($event.target.value))" />
-									<span class="fu-slider-value">{{ local_watermark_settings.tile_opacity || 12 }}%</span>
+									<span class="wm-slider-value">{{ local_watermark_settings.tile_opacity || 12 }}%</span>
 								</div>
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Tile Size") }}</label>
-									<input type="range" class="fu-slider" min="5" max="80"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Tile Size") }}</label>
+									<input type="range" class="wm-slider" min="5" max="80"
 										:value="local_watermark_settings.tile_size || 15"
 										@input="_set_wm_field('tile_size', parseFloat($event.target.value))" />
-									<span class="fu-slider-value">{{ Math.round(local_watermark_settings.tile_size || 15) }}%</span>
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.tile_size || 15) }}%</span>
 								</div>
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Rotation") }}</label>
-									<input type="range" class="fu-slider" min="-180" max="180"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Rotation") }}</label>
+									<input type="range" class="wm-slider" min="-180" max="180"
 										:value="local_watermark_settings.tile_rotation != null ? local_watermark_settings.tile_rotation : -30"
 										@input="_set_wm_field('tile_rotation', parseInt($event.target.value))" />
-									<span class="fu-slider-value">{{ local_watermark_settings.tile_rotation != null ? local_watermark_settings.tile_rotation : -30 }}°</span>
+									<span class="wm-slider-value">{{ local_watermark_settings.tile_rotation != null ? local_watermark_settings.tile_rotation : -30 }}°</span>
 								</div>
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Spacing") }}</label>
-									<input type="range" class="fu-slider" min="0" max="100"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Spacing") }}</label>
+									<input type="range" class="wm-slider" min="0" max="100"
 										:value="local_watermark_settings.tile_spacing || 40"
 										@input="_set_wm_field('tile_spacing', parseInt($event.target.value))" />
-									<span class="fu-slider-value">{{ local_watermark_settings.tile_spacing || 40 }}%</span>
+									<span class="wm-slider-value">{{ local_watermark_settings.tile_spacing || 40 }}%</span>
 								</div>
 							</template>
 							<template v-else>
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Opacity") }}</label>
-									<input type="range" class="fu-slider" min="5" max="100"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Opacity") }}</label>
+									<input type="range" class="wm-slider" min="5" max="100"
 										:value="local_watermark_settings.opacity || 50"
 										@input="_set_wm_field('opacity', parseInt($event.target.value))" />
-									<span class="fu-slider-value">{{ local_watermark_settings.opacity || 50 }}%</span>
+									<span class="wm-slider-value">{{ local_watermark_settings.opacity || 50 }}%</span>
 								</div>
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Size") }}</label>
-									<input type="range" class="fu-slider" min="5" max="100"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Size") }}</label>
+									<input type="range" class="wm-slider" min="5" max="100"
 										:value="local_watermark_settings.size || 20"
 										@input="_set_wm_field('size', parseFloat($event.target.value))" />
-									<span class="fu-slider-value">{{ Math.round(local_watermark_settings.size || 20) }}%</span>
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.size || 20) }}%</span>
 								</div>
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Position X") }}</label>
-									<input type="range" class="fu-slider" min="0" max="100"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Position X") }}</label>
+									<input type="range" class="wm-slider" min="0" max="100"
 										:value="local_watermark_settings.position_x || 80"
 										@input="_set_wm_field('position_x', parseFloat($event.target.value))" />
-									<span class="fu-slider-value">{{ Math.round(local_watermark_settings.position_x || 80) }}%</span>
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.position_x || 80) }}%</span>
 								</div>
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Position Y") }}</label>
-									<input type="range" class="fu-slider" min="0" max="100"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Position Y") }}</label>
+									<input type="range" class="wm-slider" min="0" max="100"
 										:value="local_watermark_settings.position_y || 90"
 										@input="_set_wm_field('position_y', parseFloat($event.target.value))" />
-									<span class="fu-slider-value">{{ Math.round(local_watermark_settings.position_y || 90) }}%</span>
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.position_y || 90) }}%</span>
 								</div>
-								<div class="fu-slider-row">
-									<label class="fu-slider-label">{{ __("Rotation") }}</label>
-									<input type="range" class="fu-slider" min="-180" max="180" step="5"
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Rotation") }}</label>
+									<input type="range" class="wm-slider" min="-180" max="180" step="5"
 										:value="local_watermark_settings.corner_rotation || 0"
 										@input="_set_wm_field('corner_rotation', parseFloat($event.target.value))" />
-									<span class="fu-slider-value">{{ Math.round(local_watermark_settings.corner_rotation || 0) }}°</span>
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.corner_rotation || 0) }}°</span>
 								</div>
 							</template>
-						</template>
+							<div class="wm-panel-actions">
+								<button class="btn btn-xs btn-default" @click="_reset_wm_default">{{ __("Reset") }}</button>
+								<button class="btn btn-xs btn-primary-light" @click="_save_wm_default">{{ __("Save as Default") }}</button>
+							</div>
+						</div>
 					</div>
 
 					<!-- ── COMMENTS pane ── -->
-					<div v-show="active_tab === 'comments'" class="fu-tab-pane">
-						<div class="fu-tab-enable">
-							<span class="fu-tab-enable-label">{{ __("Enable Comments") }}</span>
+					<div v-show="active_tab === 'comments'" class="cropper-tab-pane">
+						<div class="cropper-tab-enable">
+							<span class="cropper-tab-enable-label">{{ __("Enable Comments") }}</span>
 							<div
-								class="fu-toggle-pill"
+								class="toggle-pill toggle-pill-compact"
 								:class="{ active: comments_enabled_default }"
 								@click="comments_enabled_default = !comments_enabled_default"
 							>
-								<span class="fu-toggle-track" :class="{ on: comments_enabled_default }">
-									<span class="fu-toggle-thumb"></span>
+								<span class="toggle-pill-switch">
+									<span class="toggle-pill-track" :class="{ on: comments_enabled_default }">
+										<span class="toggle-pill-thumb"></span>
+									</span>
 								</span>
 							</div>
 						</div>
-						<template v-if="comments_enabled_default && local_comment_defaults">
-							<div class="fu-tab-note">{{ __("Default style for new comment boxes:") }}</div>
-							<div class="fu-tab-field">
-								<label class="fu-tab-field-label">{{ __("Font") }}</label>
-								<select class="fu-select"
+						<div v-if="comments_enabled_default && local_comment_defaults" class="adjustments-row">
+							<label class="adjustments-field-label">{{ __("Default style for new comment boxes") }}</label>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Font") }}</label>
+								<select class="wm-select-inline"
 									:value="local_comment_defaults.font_family || 'Arial'"
 									@change="_set_comment_default('font_family', $event.target.value)">
 									<option v-for="f in ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana']" :key="f" :value="f">{{ f }}</option>
 								</select>
 							</div>
-							<div class="fu-slider-row">
-								<label class="fu-slider-label">{{ __("Size") }}</label>
-								<input type="range" class="fu-slider" min="1" max="20" step="0.5"
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Size") }}</label>
+								<input type="range" class="wm-slider" min="1" max="20" step="0.5"
 									:value="local_comment_defaults.font_size_pct || 5"
 									@input="_set_comment_default('font_size_pct', parseFloat($event.target.value))" />
-								<span class="fu-slider-value">{{ (local_comment_defaults.font_size_pct || 5).toFixed(1) }}%</span>
+								<span class="wm-slider-value">{{ (local_comment_defaults.font_size_pct || 5).toFixed(1) }}%</span>
 							</div>
-							<div class="fu-inline-field-row">
-								<label class="fu-inline-check">
+							<div class="wm-inline-row">
+								<label class="wm-inline-check">
 									<input type="checkbox"
 										:checked="local_comment_defaults.font_weight === 'Bold'"
 										@change="_set_comment_default('font_weight', $event.target.checked ? 'Bold' : 'Normal')" />
-									<span>B</span>
+									<span><strong>B</strong></span>
 								</label>
-								<label class="fu-inline-check">
+								<label class="wm-inline-check">
 									<input type="checkbox"
 										:checked="local_comment_defaults.font_style === 'Italic'"
 										@change="_set_comment_default('font_style', $event.target.checked ? 'Italic' : 'Normal')" />
 									<span><em>I</em></span>
 								</label>
-								<label class="fu-inline-colour">
+								<label class="wm-inline-colour">
 									<span>{{ __("Color") }}</span>
 									<input type="color"
 										:value="local_comment_defaults.color || '#000000'"
 										@input="_set_comment_default('color', $event.target.value)" />
 								</label>
 							</div>
-							<div class="fu-tab-field">
-								<label class="fu-tab-field-label">{{ __("Align") }}</label>
-								<div class="fu-seg-row">
-									<button v-for="a in ['Left', 'Center', 'Right']" :key="a"
-										type="button" class="fu-seg-btn"
-										:class="{ active: (local_comment_defaults.align || 'Center') === a }"
-										@click="_set_comment_default('align', a)">{{ __(a) }}</button>
-								</div>
+							<label class="adjustments-field-label" style="margin-top:8px">{{ __("Align") }}</label>
+							<div class="segmented-tabs" role="tablist">
+								<button v-for="a in ['Left', 'Center', 'Right']" :key="a"
+									type="button" class="segmented-tab"
+									:class="{ active: (local_comment_defaults.align || 'Center') === a }"
+									@click="_set_comment_default('align', a)">{{ __(a) }}</button>
 							</div>
-						</template>
+							<div class="wm-panel-actions">
+								<button class="btn btn-xs btn-default" @click="_reset_comment_default">{{ __("Reset") }}</button>
+								<button class="btn btn-xs btn-primary-light" @click="_save_comment_default">{{ __("Save as Default") }}</button>
+							</div>
+						</div>
 					</div>
 
 					<!-- ── CANVAS pane ── -->
-					<div v-show="active_tab === 'canvas'" class="fu-tab-pane">
-						<div class="fu-tab-enable">
-							<span class="fu-tab-enable-label">{{ __("Enable Canvas normalization") }}</span>
+					<div v-show="active_tab === 'canvas'" class="cropper-tab-pane">
+						<div class="cropper-tab-enable">
+							<span class="cropper-tab-enable-label">{{ __("Enable Canvas normalization") }}</span>
 							<div
-								class="fu-toggle-pill"
+								class="toggle-pill toggle-pill-compact"
 								:class="{ active: resize_enabled_default }"
 								@click="resize_enabled_default = !resize_enabled_default"
 							>
-								<span class="fu-toggle-track" :class="{ on: resize_enabled_default }">
-									<span class="fu-toggle-thumb"></span>
+								<span class="toggle-pill-switch">
+									<span class="toggle-pill-track" :class="{ on: resize_enabled_default }">
+										<span class="toggle-pill-thumb"></span>
+									</span>
 								</span>
 							</div>
 						</div>
-						<template v-if="resize_enabled_default && local_resize_settings">
-							<div class="fu-tab-field">
-								<label class="fu-tab-field-label">{{ __("Aspect") }}</label>
-								<div class="fu-seg-row">
-									<button v-for="opt in ['1:1', '4:3', '16:9', '3:2', '2:3', 'Free']" :key="opt"
-										type="button" class="fu-seg-btn"
-										:class="{ active: (local_resize_settings.resize_aspect || '1:1') === opt }"
-										@click="_set_canvas_aspect(opt)">{{ opt }}</button>
-								</div>
+						<div v-if="resize_enabled_default && local_resize_settings" class="adjustments-row">
+							<label class="adjustments-field-label">{{ __("Aspect") }}</label>
+							<div class="segmented-tabs" role="tablist">
+								<button v-for="opt in ['1:1', '4:3', '16:9', '3:2', '2:3', 'Free']" :key="opt"
+									type="button" class="segmented-tab"
+									:class="{ active: (local_resize_settings.resize_aspect || '1:1') === opt }"
+									@click="_set_canvas_aspect(opt)">{{ opt }}</button>
 							</div>
-							<div class="fu-tab-field">
-								<label class="fu-tab-field-label">{{ __("Mode") }}</label>
-								<div class="fu-seg-row">
-									<button v-for="opt in ['Contain', 'Cover', 'Stretch']" :key="opt"
-										type="button" class="fu-seg-btn"
-										:class="{ active: (local_resize_settings.resize_mode || 'Contain') === opt }"
-										@click="_set_canvas_mode(opt)">{{ __(opt) }}</button>
-								</div>
+							<label class="adjustments-field-label" style="margin-top:12px">{{ __("Mode") }}</label>
+							<div class="segmented-tabs" role="tablist">
+								<button v-for="opt in ['Contain', 'Cover', 'Stretch']" :key="opt"
+									type="button" class="segmented-tab"
+									:class="{ active: (local_resize_settings.resize_mode || 'Contain') === opt }"
+									@click="_set_canvas_mode(opt)">{{ __(opt) }}</button>
 							</div>
-							<div class="fu-inline-field-row">
-								<label class="fu-inline-check">
+							<div class="wm-inline-row">
+								<label class="wm-inline-check">
 									<input type="checkbox"
 										:checked="local_resize_settings.resize_flatten_rgb !== false"
 										@change="_set_canvas_field('resize_flatten_rgb', $event.target.checked ? 1 : 0)" />
 									<span>{{ __("Solid Background") }}</span>
 								</label>
-								<label v-if="local_resize_settings.resize_flatten_rgb !== false" class="fu-inline-colour">
+								<label v-if="local_resize_settings.resize_flatten_rgb !== false" class="wm-inline-colour">
 									<span>{{ __("Color") }}</span>
 									<input type="color"
 										:value="local_resize_settings.resize_fill_color || '#FFFFFF'"
 										@input="_set_canvas_field('resize_fill_color', $event.target.value)" />
 								</label>
 							</div>
-						</template>
+							<div class="wm-panel-actions">
+								<button class="btn btn-xs btn-default" @click="_reset_canvas_default">{{ __("Reset") }}</button>
+								<button class="btn btn-xs btn-primary-light" @click="_save_canvas_default">{{ __("Save as Default") }}</button>
+							</div>
+						</div>
 					</div>
 				</div>
 			</template>
@@ -906,6 +929,128 @@ export default {
 		_set_canvas_field(field, value) {
 			if (!this.local_resize_settings) return;
 			this.$set(this.local_resize_settings, field, value);
+		},
+
+		// ── Reset / Save-as-default buttons per tab ─────────────────
+		// Reset reverts the local editable copy to the prop value the
+		// uploader was constructed with (what Settings had at dialog
+		// open). Save persists the current local values back to the
+		// Settings DocType via frappe.client.set_value so future
+		// uploads inherit them.
+
+		_reset_bg_default() {
+			this.step1_padding_pct = this.remove_bg_padding_pct != null
+				? this.remove_bg_padding_pct : 2;
+			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
+		},
+		_save_bg_default() {
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Image Processing Settings",
+					name: "Image Processing Settings",
+					fieldname: { remove_bg_padding_pct: this.step1_padding_pct },
+				},
+			}).then(() => {
+				frappe.show_alert({ message: __("Auto-crop padding saved as default"), indicator: "green" });
+			}).catch(() => {
+				frappe.show_alert({ message: __("Failed to save default"), indicator: "red" });
+			});
+		},
+
+		_reset_wm_default() {
+			if (!this.watermark_settings) return;
+			this.local_watermark_settings = JSON.parse(JSON.stringify(this.watermark_settings));
+			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
+		},
+		_save_wm_default() {
+			const s = this.local_watermark_settings;
+			if (!s) return;
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Watermark Settings",
+					name: "Watermark Settings",
+					fieldname: {
+						mode: s.mode || "Tiled",
+						position_x: s.position_x != null ? s.position_x : 80,
+						position_y: s.position_y != null ? s.position_y : 90,
+						corner_rotation: s.corner_rotation != null ? s.corner_rotation : 0,
+						size: s.size != null ? s.size : 20,
+						opacity: s.opacity != null ? s.opacity : 50,
+						tile_size: s.tile_size != null ? s.tile_size : 15,
+						tile_opacity: s.tile_opacity != null ? s.tile_opacity : 12,
+						tile_rotation: s.tile_rotation != null ? s.tile_rotation : -30,
+						tile_spacing: s.tile_spacing != null ? s.tile_spacing : 40,
+					},
+				},
+			}).then(() => {
+				// Refresh the shared cache so subsequent upload dialogs pick up
+				// the new defaults without a page reload.
+				if (frappe._watermark_settings_cache) {
+					Object.assign(frappe._watermark_settings_cache, s);
+				}
+				frappe.show_alert({ message: __("Watermark defaults saved"), indicator: "green" });
+			}).catch(() => {
+				frappe.show_alert({ message: __("Failed to save defaults"), indicator: "red" });
+			});
+		},
+
+		_reset_comment_default() {
+			if (!this.comment_defaults) return;
+			this.local_comment_defaults = JSON.parse(JSON.stringify(this.comment_defaults));
+			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
+		},
+		_save_comment_default() {
+			const c = this.local_comment_defaults;
+			if (!c) return;
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Image Processing Settings",
+					name: "Image Processing Settings",
+					fieldname: {
+						default_comment_font_family: c.font_family || "Arial",
+						default_comment_font_size_pct: c.font_size_pct || 5,
+						default_comment_font_weight: c.font_weight || "Normal",
+						default_comment_font_style: c.font_style || "Normal",
+						default_comment_color: c.color || "#000000",
+						default_comment_align: c.align || "Center",
+					},
+				},
+			}).then(() => {
+				frappe.show_alert({ message: __("Comment defaults saved"), indicator: "green" });
+			}).catch(() => {
+				frappe.show_alert({ message: __("Failed to save defaults"), indicator: "red" });
+			});
+		},
+
+		_reset_canvas_default() {
+			if (!this.resize_settings) return;
+			this.local_resize_settings = JSON.parse(JSON.stringify(this.resize_settings));
+			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
+		},
+		_save_canvas_default() {
+			const r = this.local_resize_settings;
+			if (!r) return;
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Image Processing Settings",
+					name: "Image Processing Settings",
+					fieldname: {
+						resize_enabled: this.resize_enabled_default ? 1 : 0,
+						resize_aspect: r.resize_aspect || "1:1",
+						resize_mode: r.resize_mode || "Contain",
+						resize_fill_color: r.resize_fill_color || "#FFFFFF",
+						resize_flatten_rgb: r.resize_flatten_rgb !== false ? 1 : 0,
+					},
+				},
+			}).then(() => {
+				frappe.show_alert({ message: __("Canvas defaults saved"), indicator: "green" });
+			}).catch(() => {
+				frappe.show_alert({ message: __("Failed to save defaults"), indicator: "red" });
+			});
 		},
 		dragover() {
 			this.is_dragging = true;
@@ -1308,248 +1453,113 @@ export default {
 	min-height: 360px;
 }
 
-/* Tab header strip ─ matches the cropper's .cropper-feature-tabs
-   visual style so Step 1 and Step 2 look like the same control. */
-.fu-feature-tabs {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+/* ── Shared panel styles ──────────────────────────────────────────
+   Identical selectors + values to the cropper's scoped styles
+   (ImageCropper.vue). Because those are `scoped`, they only apply
+   inside the cropper; the uploader's Step 1 panel needs its own
+   copy so it renders identically without cross-component leaks.
+-------------------------------------------------------------------- */
+
+/* Tab header strip */
+.file-uploader .cropper-feature-tabs {
+	display: flex;
 	gap: 6px;
-	background: #f1f5f9;
-	border-radius: 10px;
-	padding: 6px;
+	margin-bottom: 10px;
 }
-.fu-feature-tab {
+.file-uploader .cropper-feature-tab {
+	flex: 1;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 5px;
-	padding: 12px 8px;
-	background: transparent;
-	border: none;
+	gap: 4px;
+	padding: 10px 6px;
+	background: #fff;
+	border: 1px solid var(--border-color);
 	border-radius: 8px;
 	cursor: pointer;
-	color: #64748b;
-	transition: background 0.15s ease, color 0.15s ease;
+	color: #303133;
+	transition: all 0.15s ease;
 }
-.fu-feature-tab:hover { background: rgba(255, 255, 255, 0.55); }
-.fu-feature-tab.active {
-	background: #fff;
-	color: var(--primary);
-	box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+.file-uploader .cropper-feature-tab:hover {
+	border-color: var(--primary);
 }
-.fu-feature-tab-label {
+.file-uploader .cropper-feature-tab.active {
+	border: 2px solid var(--primary);
+	background: #ecf5ff;
+}
+.file-uploader .cropper-feature-tab-label {
 	font-weight: 600;
 	font-size: 15px;
+	color: #303133;
 	line-height: 1.2;
 }
-.fu-feature-tab-state {
+.file-uploader .cropper-feature-tab.active .cropper-feature-tab-label {
+	color: var(--primary);
+}
+.file-uploader .cropper-feature-tab-state {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: 5px;
 	font-size: 13px;
-	font-weight: 500;
+	font-weight: 600;
 	text-transform: uppercase;
-	letter-spacing: 0.02em;
 }
-.fu-feature-tab-state.on { color: #10b981; }
-.fu-feature-tab-state.off { color: #94a3b8; }
-.fu-feature-tab-dot {
+.file-uploader .cropper-feature-tab-state.on { color: #22c55e; }
+.file-uploader .cropper-feature-tab-state.off { color: #94a3b8; }
+.file-uploader .cropper-feature-tab-dot {
 	width: 8px;
 	height: 8px;
 	border-radius: 50%;
 	background: currentColor;
 }
 
-.fu-tab-body { flex: 1 1 auto; }
-.fu-tab-pane {
+/* Tab body */
+.file-uploader .cropper-tab-body {
+	flex: 1;
+	padding: 14px;
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	background: #fff;
+	overflow-y: auto;
+	min-height: 0;
+}
+.file-uploader .cropper-tab-pane {
 	display: flex;
 	flex-direction: column;
 	gap: 14px;
 }
-.fu-tab-enable {
+
+/* "Enable X" row at top of each pane */
+.file-uploader .cropper-tab-enable {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 14px 16px;
+	padding: 12px 14px;
 	border: 1px solid var(--border-color);
-	border-radius: 8px;
+	border-radius: 6px;
 	background: #fafbfc;
 }
-.fu-tab-enable-label {
+.file-uploader .cropper-tab-enable-label {
 	font-size: 16px;
 	font-weight: 600;
 	color: #303133;
 }
-.fu-tab-note {
-	font-size: 14px;
-	color: var(--text-muted);
-	line-height: 1.55;
-	padding: 12px 14px;
-	background: #f8fafc;
-	border-radius: 8px;
-}
-.fu-tab-note a {
-	color: var(--primary);
-	text-decoration: underline;
-	margin-left: 4px;
-}
-.fu-tab-field {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-}
-.fu-tab-field-label {
-	font-size: 14px;
-	font-weight: 600;
-	color: #475569;
-	text-transform: uppercase;
-	letter-spacing: 0.03em;
-	margin: 0;
-}
-.fu-seg-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-}
-.fu-seg-btn {
-	padding: 7px 14px;
-	font-size: 14px;
-	font-weight: 500;
-	color: #475569;
-	background: #fff;
-	border: 1px solid var(--border-color);
-	border-radius: 6px;
-	cursor: pointer;
-	transition: all 0.15s ease;
-}
-.fu-seg-btn:hover { border-color: var(--primary); }
-.fu-seg-btn.active {
-	background: var(--primary);
-	color: #fff;
-	border-color: var(--primary);
-}
 
-/* Slider row — label | slider | value, matches cropper's .wm-slider-row */
-.fu-slider-row {
-	display: grid;
-	grid-template-columns: 100px 1fr 52px;
-	align-items: center;
-	gap: 10px;
-}
-.fu-slider-label {
-	font-size: 14px;
-	font-weight: 500;
-	color: #475569;
-	margin: 0;
-}
-.fu-slider {
-	width: 100%;
-	height: 4px;
-	-webkit-appearance: none;
-	appearance: none;
-	background: #e2e8f0;
-	border-radius: 2px;
-	outline: none;
-	cursor: pointer;
-}
-.fu-slider::-webkit-slider-thumb {
-	-webkit-appearance: none;
-	appearance: none;
-	width: 16px;
-	height: 16px;
-	border-radius: 50%;
-	background: var(--primary);
-	cursor: grab;
-	border: 2px solid white;
-	box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
-}
-.fu-slider::-moz-range-thumb {
-	width: 16px;
-	height: 16px;
-	border-radius: 50%;
-	background: var(--primary);
-	cursor: grab;
-	border: 2px solid white;
-}
-.fu-slider-value {
-	font-size: 13px;
-	color: #303133;
-	text-align: right;
-	font-variant-numeric: tabular-nums;
-	font-weight: 500;
-}
-
-/* Select dropdown within a pane */
-.fu-select {
-	width: 100%;
-	padding: 7px 10px;
-	font-size: 14px;
-	border: 1px solid var(--border-color);
-	border-radius: 6px;
-	background: #fff;
-	color: #303133;
-	cursor: pointer;
-}
-.fu-select:focus {
-	outline: none;
-	border-color: var(--primary);
-	box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
-}
-
-/* Row of inline fields: [B] [I] [Color ▣] — used in Comments + Canvas */
-.fu-inline-field-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 14px;
-	align-items: center;
-}
-.fu-inline-check {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	font-size: 14px;
-	font-weight: 500;
-	color: #475569;
-	cursor: pointer;
-	margin: 0;
-}
-.fu-inline-check input[type="checkbox"] {
-	width: 18px;
-	height: 18px;
-	cursor: pointer;
-	margin: 0;
-}
-.fu-inline-colour {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	font-size: 14px;
-	font-weight: 500;
-	color: #475569;
-	margin: 0;
-}
-.fu-inline-colour input[type="color"] {
-	width: 36px;
-	height: 28px;
-	padding: 2px;
-	border: 1px solid var(--border-color);
-	border-radius: 4px;
-	cursor: pointer;
-	background: transparent;
-}
-
-/* Toggle pill — same look as the cropper's compact toggle */
-.fu-toggle-pill {
+/* Toggle pill (same DOM as cropper) */
+.file-uploader .toggle-pill {
 	display: inline-flex;
 	align-items: center;
 	cursor: pointer;
 }
-.fu-toggle-pill.is-disabled {
+.file-uploader .toggle-pill.is-disabled {
 	cursor: not-allowed;
 	opacity: 0.55;
 }
-.fu-toggle-track {
+.file-uploader .toggle-pill-switch {
+	display: inline-flex;
+}
+.file-uploader .toggle-pill-track {
 	display: inline-block;
 	width: 40px;
 	height: 22px;
@@ -1558,8 +1568,8 @@ export default {
 	position: relative;
 	transition: background 0.2s ease;
 }
-.fu-toggle-track.on { background: var(--primary); }
-.fu-toggle-thumb {
+.file-uploader .toggle-pill-track.on { background: var(--primary); }
+.file-uploader .toggle-pill-thumb {
 	position: absolute;
 	top: 3px;
 	left: 3px;
@@ -1569,7 +1579,168 @@ export default {
 	background: #fff;
 	transition: transform 0.2s ease;
 }
-.fu-toggle-track.on .fu-toggle-thumb { transform: translateX(18px); }
+.file-uploader .toggle-pill-track.on .toggle-pill-thumb {
+	transform: translateX(18px);
+}
+
+/* Slider row (label | slider | value) */
+.file-uploader .wm-slider-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 6px;
+}
+.file-uploader .wm-slider-row:last-child { margin-bottom: 0; }
+.file-uploader .wm-slider-label {
+	width: 100px;
+	font-size: 15px;
+	font-weight: 500;
+	color: #475569;
+}
+.file-uploader .wm-slider {
+	flex: 1;
+	height: 4px;
+	cursor: pointer;
+	accent-color: var(--primary);
+}
+.file-uploader .wm-slider-value {
+	width: 52px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #303133;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Font family dropdown that lives in a wm-slider-row slot */
+.file-uploader .wm-select-inline {
+	flex: 1;
+	padding: 7px 10px;
+	font-size: 14px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: #fff;
+	color: #303133;
+	cursor: pointer;
+}
+.file-uploader .wm-select-inline:focus {
+	outline: none;
+	border-color: var(--primary);
+	box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+/* Segmented mode selector (Tiled/Corner, Aspect 1:1/4:3/…, Align L/C/R) */
+.file-uploader .segmented-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	background: var(--gray-100, #f3f4f6);
+	padding: 3px;
+	border-radius: 8px;
+	gap: 2px;
+}
+.file-uploader .segmented-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 18px;
+	border: none;
+	border-radius: 6px;
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--text-color);
+	background: transparent;
+	cursor: pointer;
+	transition: all 0.18s ease;
+	white-space: nowrap;
+}
+.file-uploader .segmented-tab:hover {
+	background: var(--gray-200, #e5e7eb);
+}
+.file-uploader .segmented-tab.active {
+	background: var(--primary);
+	color: #fff;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* Row of inline check/color fields (B / I / Color ▣ / Solid BG ☑) */
+.file-uploader .wm-inline-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 14px;
+	align-items: center;
+	margin-top: 6px;
+}
+.file-uploader .wm-inline-check {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #475569;
+	cursor: pointer;
+	margin: 0;
+}
+.file-uploader .wm-inline-check input[type="checkbox"] {
+	width: 18px;
+	height: 18px;
+	margin: 0;
+	cursor: pointer;
+}
+.file-uploader .wm-inline-colour {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #475569;
+	margin: 0;
+}
+.file-uploader .wm-inline-colour input[type="color"] {
+	width: 36px;
+	height: 28px;
+	padding: 2px;
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	cursor: pointer;
+	background: transparent;
+}
+
+/* Adjustments sub-rows (padding, watermark content, comment content…) */
+.file-uploader .adjustments-row {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.file-uploader .adjustments-row-wm {
+	gap: 10px;
+}
+.file-uploader .adjustments-warn {
+	font-size: 13px;
+	color: var(--text-muted);
+	padding: 10px 12px;
+	background: #f8fafc;
+	border-radius: 6px;
+}
+.file-uploader .adjustments-field-label {
+	display: block;
+	margin: 0 0 6px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--text-color);
+}
+
+/* Panel action row (Reset / Save as Default) */
+.file-uploader .wm-panel-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 12px;
+}
+.file-uploader .wm-panel-actions .btn-xs {
+	font-size: 13px;
+	padding: 5px 14px;
+	line-height: 1.6;
+}
 
 /* ── Recap card (Step 3) ────────────────────────────────────────── */
 .fu-recap-card {
@@ -1638,21 +1809,14 @@ export default {
 		min-height: 0;
 		padding: 14px;
 	}
-	.fu-feature-tabs {
-		grid-template-columns: repeat(4, 1fr);
-	}
-	.fu-feature-tab { padding: 10px 4px; }
-	.fu-feature-tab-label { font-size: 14px; }
-	.fu-feature-tab-state { font-size: 12px; }
-	.fu-tab-enable-label { font-size: 15px; }
-	.fu-tab-note { font-size: 13px; }
-	.fu-recap-list li { font-size: 14px; padding: 10px 12px; }
-	.fu-slider-row {
-		grid-template-columns: 84px 1fr 44px;
-		gap: 8px;
-	}
-	.fu-slider-label { font-size: 13px; }
-	.fu-slider-value { font-size: 12px; }
+	.file-uploader .cropper-feature-tab { padding: 8px 4px; }
+	.file-uploader .cropper-feature-tab-label { font-size: 14px; }
+	.file-uploader .cropper-feature-tab-state { font-size: 12px; }
+	.file-uploader .cropper-tab-enable-label { font-size: 15px; }
+	.file-uploader .fu-recap-list li { font-size: 14px; padding: 10px 12px; }
+	.file-uploader .wm-slider-label { width: 82px; font-size: 13px; }
+	.file-uploader .wm-slider-value { width: 44px; font-size: 12px; }
+	.file-uploader .segmented-tab { padding: 7px 12px; font-size: 13px; }
 }
 
 .file-upload-area {

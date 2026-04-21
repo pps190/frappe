@@ -2526,22 +2526,28 @@ img {
 .wm-slider-row {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 12px;
+	margin-bottom: 6px;
+}
+.wm-slider-row:last-child {
+	margin-bottom: 0;
 }
 .wm-slider-row .wm-slider-label {
-	width: 80px;
-	font-size: 11px;
-	color: #606266;
+	width: 100px;
+	font-size: 15px;
+	font-weight: 500;
+	color: #475569;
 }
 .wm-slider-row .wm-slider {
 	flex: 1;
 }
 .wm-slider-row .wm-slider-value {
-	width: 40px;
-	font-size: 11px;
+	width: 52px;
+	font-size: 14px;
 	color: #303133;
 	text-align: right;
 	font-variant-numeric: tabular-nums;
+	font-weight: 500;
 }
 
 /* ── Mobile: stack left + right columns ── */
@@ -2552,6 +2558,12 @@ img {
 	.cropper-feature-tabs {
 		grid-template-columns: repeat(4, 1fr);
 	}
+	.cropper-feature-tab-label { font-size: 14px; }
+	.cropper-feature-tab-state { font-size: 12px; }
+	.cropper-tab-enable-label { font-size: 15px; }
+	.wm-slider-row .wm-slider-label { width: 82px; font-size: 13px; }
+	.wm-slider-row .wm-slider-value { width: 44px; font-size: 12px; }
+	.segmented-tab { padding: 7px 12px; font-size: 13px; }
 }
 
 /* ── Unified Image Adjustments panel ──
@@ -2575,7 +2587,7 @@ img {
 .adjustments-field-label {
 	display: block;
 	margin: 0 0 6px;
-	font-size: 12px;
+	font-size: 14px;
 	font-weight: 600;
 	color: var(--text-color);
 	letter-spacing: 0.01em;
@@ -2622,10 +2634,10 @@ img {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	padding: 6px 16px;
+	padding: 8px 18px;
 	border: none;
 	border-radius: 6px;
-	font-size: var(--text-sm);
+	font-size: 14px;
 	font-weight: 500;
 	color: var(--text-color);
 	background: transparent;
@@ -2856,7 +2868,7 @@ img {
 	border: none;
 	outline: none;
 	background: transparent;
-	font-size: var(--text-sm);
+	font-size: 14px;
 	color: var(--text-color);
 	padding: 0 6px;
 	min-width: 0;
@@ -2871,7 +2883,7 @@ img {
 }
 
 .wm-input-suffix {
-	font-size: 11px;
+	font-size: 13px;
 	color: var(--text-muted);
 	padding: 0 6px;
 	user-select: none;
@@ -2917,13 +2929,13 @@ img {
 .wm-panel-actions {
 	display: flex;
 	justify-content: flex-end;
-	gap: 6px;
-	margin-top: 8px;
+	gap: 8px;
+	margin-top: 12px;
 }
 
 .wm-panel-actions .btn-xs {
-	font-size: 11px;
-	padding: 2px 10px;
+	font-size: 13px;
+	padding: 5px 14px;
 	line-height: 1.6;
 }
 
