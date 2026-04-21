@@ -1,10 +1,15 @@
 <template>
 	<div
 		class="file-uploader"
+		:class="{
+			'fu-with-panel': any_feature_shown && !show_image_cropper && !show_file_browser && !show_web_link,
+		}"
 		@dragover.prevent="dragover"
 		@dragleave.prevent="dragleave"
 		@drop.prevent="dropfiles"
 	>
+		<!-- LEFT COLUMN: dropzone (step 1) OR file list (step 3) -->
+		<div class="fu-left-col">
 		<div
 			class="file-upload-area"
 			v-show="files.length === 0 && !show_file_browser && !show_web_link"
@@ -214,6 +219,186 @@
 				</div>
 			</div>
 		</div>
+		</div><!-- /.fu-left-col -->
+
+		<!-- RIGHT COLUMN: feature tabs + pane OR recap card
+		     Only rendered outside the cropper step (cropper has its own
+		     identical panel). Hidden entirely when no feature was
+		     requested, so non-image uploads keep the simple single-column
+		     layout that Frappe's default uploader has. -->
+		<div
+			class="fu-right-col"
+			v-if="any_feature_shown && !show_image_cropper && !show_file_browser && !show_web_link"
+		>
+			<!-- Step 3 (files added, crop committed): read-only recap -->
+			<template v-if="files.length > 0">
+				<div class="fu-recap-card">
+					<div class="fu-recap-title">{{ __("Applied to your image") }}</div>
+					<div class="fu-recap-hint">{{ __("Locked in at the Crop step — cannot be edited after upload.") }}</div>
+					<ul class="fu-recap-list">
+						<li v-if="show_remove_bg" :class="{ off: !remove_bg_checked }">
+							<span class="fu-recap-dot" :class="remove_bg_checked ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Remove Background") }}</span>
+							<span class="fu-recap-value">{{ remove_bg_checked ? __("on") : __("off") }}</span>
+						</li>
+						<li v-if="show_watermark" :class="{ off: !wm_enabled }">
+							<span class="fu-recap-dot" :class="wm_enabled ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Watermark") }}</span>
+							<span class="fu-recap-value">
+								{{ wm_enabled
+									? (watermark_settings && watermark_settings.mode === "Corner" ? __("Corner") : __("Tiled"))
+									: __("off") }}
+							</span>
+						</li>
+						<li v-if="show_comments" :class="{ off: !comments_enabled_default }">
+							<span class="fu-recap-dot" :class="comments_enabled_default ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Comments") }}</span>
+							<span class="fu-recap-value">{{ comments_enabled_default ? __("on") : __("off") }}</span>
+						</li>
+						<li v-if="show_resize" :class="{ off: !resize_enabled_default }">
+							<span class="fu-recap-dot" :class="resize_enabled_default ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Canvas") }}</span>
+							<span class="fu-recap-value">{{ resize_enabled_default ? (resize_settings && resize_settings.resize_aspect) || "1:1" : __("off") }}</span>
+						</li>
+					</ul>
+				</div>
+			</template>
+
+			<!-- Step 1 (no files yet): interactive 4-tab panel -->
+			<template v-else>
+				<div class="fu-feature-tabs" role="tablist">
+					<button
+						v-for="tab in available_tabs"
+						:key="tab.key"
+						type="button"
+						class="fu-feature-tab"
+						:class="{ active: active_tab === tab.key }"
+						role="tab"
+						:aria-selected="active_tab === tab.key"
+						@click="active_tab = tab.key"
+					>
+						<span class="fu-feature-tab-label">{{ tab.label }}</span>
+						<span class="fu-feature-tab-state" :class="tab.on ? 'on' : 'off'">
+							<span class="fu-feature-tab-dot"></span>
+							{{ tab.on ? __("on") : __("off") }}
+						</span>
+					</button>
+				</div>
+
+				<div class="fu-tab-body">
+					<!-- REMOVE BG pane -->
+					<div v-show="active_tab === 'remove_bg'" class="fu-tab-pane">
+						<div class="fu-tab-enable">
+							<span class="fu-tab-enable-label">{{ __("Enable Remove Background") }}</span>
+							<div
+								class="fu-toggle-pill"
+								:class="{ active: remove_bg_checked, 'is-disabled': !!remove_bg_disabled_hint }"
+								@click="!remove_bg_disabled_hint && (remove_bg_checked = !remove_bg_checked)"
+							>
+								<span class="fu-toggle-track" :class="{ on: remove_bg_checked && !remove_bg_disabled_hint }">
+									<span class="fu-toggle-thumb"></span>
+								</span>
+							</div>
+						</div>
+						<div v-if="remove_bg_disabled_hint" class="fu-tab-note">
+							{{ remove_bg_disabled_hint }}
+							<a v-if="remove_bg_disabled_link" :href="remove_bg_disabled_link">{{ __("Configure") }}</a>
+						</div>
+						<div v-else class="fu-tab-note">
+							{{ __("Auto-crop padding + mask preview available after adding a file.") }}
+						</div>
+					</div>
+
+					<!-- WATERMARK pane -->
+					<div v-show="active_tab === 'watermark'" class="fu-tab-pane">
+						<div class="fu-tab-enable">
+							<span class="fu-tab-enable-label">{{ __("Enable Watermark") }}</span>
+							<div
+								class="fu-toggle-pill"
+								:class="{ active: wm_enabled, 'is-disabled': !watermark_settings || !watermark_settings.watermark_image }"
+								@click="(watermark_settings && watermark_settings.watermark_image) && (wm_enabled = !wm_enabled)"
+							>
+								<span class="fu-toggle-track" :class="{ on: wm_enabled }">
+									<span class="fu-toggle-thumb"></span>
+								</span>
+							</div>
+						</div>
+						<div v-if="!watermark_settings || !watermark_settings.watermark_image" class="fu-tab-note">
+							{{ __("No watermark image uploaded.") }}
+							<a href="/app/watermark-settings">{{ __("Configure") }}</a>
+						</div>
+						<div v-else class="fu-tab-note">
+							{{ __("Mode: {0}. Position, size and rotation are editable in the Crop step.", [(watermark_settings && watermark_settings.mode) || "Tiled"]) }}
+						</div>
+					</div>
+
+					<!-- COMMENTS pane -->
+					<div v-show="active_tab === 'comments'" class="fu-tab-pane">
+						<div class="fu-tab-enable">
+							<span class="fu-tab-enable-label">{{ __("Enable Comments") }}</span>
+							<div
+								class="fu-toggle-pill"
+								:class="{ active: comments_enabled_default }"
+								@click="comments_enabled_default = !comments_enabled_default"
+							>
+								<span class="fu-toggle-track" :class="{ on: comments_enabled_default }">
+									<span class="fu-toggle-thumb"></span>
+								</span>
+							</div>
+						</div>
+						<div class="fu-tab-note">
+							{{ __("Add, position and style text overlays in the Crop step.") }}
+						</div>
+					</div>
+
+					<!-- CANVAS pane (aspect + mode are editable here, baked later) -->
+					<div v-show="active_tab === 'canvas'" class="fu-tab-pane">
+						<div class="fu-tab-enable">
+							<span class="fu-tab-enable-label">{{ __("Enable Canvas normalization") }}</span>
+							<div
+								class="fu-toggle-pill"
+								:class="{ active: resize_enabled_default }"
+								@click="resize_enabled_default = !resize_enabled_default"
+							>
+								<span class="fu-toggle-track" :class="{ on: resize_enabled_default }">
+									<span class="fu-toggle-thumb"></span>
+								</span>
+							</div>
+						</div>
+						<div v-if="resize_enabled_default && resize_settings" class="fu-tab-field">
+							<label class="fu-tab-field-label">{{ __("Aspect") }}</label>
+							<div class="fu-seg-row">
+								<button
+									v-for="opt in ['1:1', '4:3', '16:9', '3:2', '2:3', 'Free']"
+									:key="opt"
+									type="button"
+									class="fu-seg-btn"
+									:class="{ active: (resize_settings.resize_aspect || '1:1') === opt }"
+									@click="_set_canvas_aspect(opt)"
+								>{{ opt }}</button>
+							</div>
+						</div>
+						<div v-if="resize_enabled_default && resize_settings" class="fu-tab-field">
+							<label class="fu-tab-field-label">{{ __("Mode") }}</label>
+							<div class="fu-seg-row">
+								<button
+									v-for="opt in ['Contain', 'Cover', 'Stretch']"
+									:key="opt"
+									type="button"
+									class="fu-seg-btn"
+									:class="{ active: (resize_settings.resize_mode || 'Contain') === opt }"
+									@click="_set_canvas_mode(opt)"
+								>{{ __(opt) }}</button>
+							</div>
+						</div>
+						<div v-else class="fu-tab-note">
+							{{ __("Resize, background color and file-size cap are configurable in the Crop step.") }}
+						</div>
+					</div>
+				</div>
+			</template>
+		</div><!-- /.fu-right-col -->
+
 		<ImageCropper
 			v-if="show_image_cropper && wrapper_ready"
 			:file="files[crop_image_with_index]"
@@ -376,6 +561,10 @@ export default {
 			// carry the user's default toggle intent into the cropper.
 			comments_enabled_default: !!(this.comment_defaults && this.comment_defaults.enabled),
 			resize_enabled_default: !!(this.resize_settings && this.resize_settings.resize_enabled),
+			// Which right-panel tab is visible on Step 1. Reset in mounted()
+			// to the first-available feature so the pane doesn't open on a
+			// tab the consumer didn't opt into.
+			active_tab: "remove_bg",
 		};
 	},
 	created() {
@@ -424,8 +613,68 @@ export default {
 				this.files.every((file) => file.total !== 0 && file.progress === file.total)
 			);
 		},
+		// At least one of the 4 image-processing features was opted-in by
+		// the caller. Controls whether the right-side panel renders at all
+		// — a plain Attachment upload (no image processing) stays
+		// single-column like the original Frappe uploader.
+		any_feature_shown() {
+			return !!(this.show_remove_bg || this.show_watermark
+				|| this.show_comments || this.show_resize);
+		},
+		// Tab objects used by the v-for in the template. Each entry knows
+		// its ON state so the pill header can render the green/grey dot
+		// without the template having to branch on key.
+		available_tabs() {
+			const tabs = [];
+			if (this.show_remove_bg) {
+				tabs.push({
+					key: "remove_bg",
+					label: __("Remove BG"),
+					on: !!this.remove_bg_checked && !this.remove_bg_disabled_hint,
+				});
+			}
+			if (this.show_watermark) {
+				tabs.push({
+					key: "watermark",
+					label: __("Watermark"),
+					on: !!this.wm_enabled,
+				});
+			}
+			if (this.show_comments) {
+				tabs.push({
+					key: "comments",
+					label: __("Comments"),
+					on: !!this.comments_enabled_default,
+				});
+			}
+			if (this.show_resize) {
+				tabs.push({
+					key: "canvas",
+					label: __("Canvas"),
+					on: !!this.resize_enabled_default,
+				});
+			}
+			return tabs;
+		},
+	},
+	mounted() {
+		// Reset active_tab to the first available feature, so the panel
+		// doesn't land on a tab the consumer didn't opt into.
+		const first = this.available_tabs[0];
+		if (first) this.active_tab = first.key;
 	},
 	methods: {
+		// Canvas (Resize) aspect + mode editors for Step 1. We mutate the
+		// resize_settings object in place so the cropper picks up the
+		// latest values via its own prop watcher when the user clicks Crop.
+		_set_canvas_aspect(opt) {
+			if (!this.resize_settings) return;
+			this.$set(this.resize_settings, "resize_aspect", opt);
+		},
+		_set_canvas_mode(opt) {
+			if (!this.resize_settings) return;
+			this.$set(this.resize_settings, "resize_mode", opt);
+		},
 		dragover() {
 			this.is_dragging = true;
 		},
@@ -798,6 +1047,256 @@ export default {
 };
 </script>
 <style>
+/* ── 2-column grid for Step 1 + Step 3 ──────────────────────────────
+   The uploader auto-splits into a left column (dropzone / file list)
+   and a right column (feature-tabs / recap) when the caller opts into
+   any image-processing feature. Plain attachment uploads (no features)
+   still render single-column like the original Frappe dialog. The
+   cropper step switches off the grid via .fu-cropper-mode so it can
+   use its own internal layout.
+-------------------------------------------------------------------- */
+.file-uploader { display: block; }
+.file-uploader.fu-with-panel {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 320px;
+	gap: 16px;
+	align-items: start;
+}
+.file-uploader .fu-left-col { min-width: 0; }
+.file-uploader .fu-right-col {
+	position: sticky;
+	top: 0;
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	background: #fff;
+	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+/* Tab header strip ─ matches the cropper's .cropper-feature-tabs
+   visual style so Step 1 and Step 2 look like the same control. */
+.fu-feature-tabs {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+	gap: 4px;
+	background: #f1f5f9;
+	border-radius: 8px;
+	padding: 4px;
+}
+.fu-feature-tab {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 3px;
+	padding: 8px 6px;
+	background: transparent;
+	border: none;
+	border-radius: 6px;
+	cursor: pointer;
+	color: #64748b;
+	font-size: 12px;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+.fu-feature-tab:hover { background: rgba(255, 255, 255, 0.55); }
+.fu-feature-tab.active {
+	background: #fff;
+	color: var(--primary);
+	box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+.fu-feature-tab-label {
+	font-weight: 600;
+	font-size: 11px;
+	line-height: 1.2;
+}
+.fu-feature-tab-state {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	font-size: 10px;
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+.fu-feature-tab-state.on { color: #10b981; }
+.fu-feature-tab-state.off { color: #94a3b8; }
+.fu-feature-tab-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+.fu-tab-body { flex: 1 1 auto; }
+.fu-tab-pane {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.fu-tab-enable {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 10px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: #fafbfc;
+}
+.fu-tab-enable-label {
+	font-size: 13px;
+	font-weight: 600;
+	color: #303133;
+}
+.fu-tab-note {
+	font-size: 12px;
+	color: var(--text-muted);
+	line-height: 1.5;
+	padding: 8px 10px;
+	background: #f8fafc;
+	border-radius: 6px;
+}
+.fu-tab-note a {
+	color: var(--primary);
+	text-decoration: underline;
+	margin-left: 4px;
+}
+.fu-tab-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.fu-tab-field-label {
+	font-size: 11px;
+	font-weight: 600;
+	color: #475569;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	margin: 0;
+}
+.fu-seg-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+.fu-seg-btn {
+	padding: 4px 10px;
+	font-size: 12px;
+	font-weight: 500;
+	color: #475569;
+	background: #fff;
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+.fu-seg-btn:hover { border-color: var(--primary); }
+.fu-seg-btn.active {
+	background: var(--primary);
+	color: #fff;
+	border-color: var(--primary);
+}
+
+/* Toggle pill — same look as the cropper's compact toggle */
+.fu-toggle-pill {
+	display: inline-flex;
+	align-items: center;
+	cursor: pointer;
+}
+.fu-toggle-pill.is-disabled {
+	cursor: not-allowed;
+	opacity: 0.55;
+}
+.fu-toggle-track {
+	display: inline-block;
+	width: 30px;
+	height: 16px;
+	border-radius: 8px;
+	background: #cbd5e1;
+	position: relative;
+	transition: background 0.2s ease;
+}
+.fu-toggle-track.on { background: var(--primary); }
+.fu-toggle-thumb {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: #fff;
+	transition: transform 0.2s ease;
+}
+.fu-toggle-track.on .fu-toggle-thumb { transform: translateX(14px); }
+
+/* ── Recap card (Step 3) ────────────────────────────────────────── */
+.fu-recap-card {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.fu-recap-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: #0f172a;
+}
+.fu-recap-hint {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-bottom: 8px;
+}
+.fu-recap-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.fu-recap-list li {
+	display: grid;
+	grid-template-columns: 10px 1fr auto;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: #fafbfc;
+	font-size: 12px;
+}
+.fu-recap-list li.off {
+	background: #f8fafc;
+	color: #94a3b8;
+}
+.fu-recap-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+}
+.fu-recap-dot.on  { background: #10b981; }
+.fu-recap-dot.off { background: #cbd5e1; }
+.fu-recap-label { font-weight: 500; }
+.fu-recap-value {
+	font-size: 11px;
+	color: #64748b;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+/* ── Mobile: stack right column below left ─────────────────────── */
+@media (max-width: 768px) {
+	.file-uploader.fu-with-panel {
+		grid-template-columns: 1fr;
+	}
+	.file-uploader .fu-right-col {
+		position: static;
+	}
+	.fu-feature-tabs {
+		grid-template-columns: repeat(4, 1fr);
+	}
+}
+
 .file-upload-area {
 	min-height: 20rem;
 	display: flex;

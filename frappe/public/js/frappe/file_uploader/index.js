@@ -140,51 +140,11 @@ export default class FileUploader {
 			this.uploader.add_files(files);
 		}
 
-		// Add footer toggles after uploader is ready. Order matches the
-		// tabs inside the cropper (Remove BG → Watermark → Comments →
-		// Canvas) so the user sees the same 4 features in the same order
-		// on both the file-picker page and the cropper page.
-		if (this.dialog && this.show_remove_bg) {
-			this.add_footer_toggle(
-				"remove_bg",
-				__("Remove Background"),
-				"remove_bg_checked",
-				!this.remove_bg_disabled_hint,
-				this.remove_bg_disabled_hint || null,
-				this.remove_bg_disabled_link || null,
-			);
-		}
-		if (this.dialog && this.show_watermark) {
-			const has_config = this.watermark_settings && this.watermark_settings.watermark_image;
-			this.add_footer_toggle(
-				"watermark",
-				__("Watermark"),
-				"wm_enabled",
-				has_config && this.watermark_settings.enabled ? true : false,
-				has_config ? null : __("Click to configure watermark"),
-				has_config ? null : "/app/watermark-settings",
-			);
-		}
-		if (this.dialog && this.show_comments) {
-			this.add_footer_toggle(
-				"comments",
-				__("Comments"),
-				"comments_enabled_default",
-				!!(this.comment_defaults && this.comment_defaults.enabled),
-				null,
-				null,
-			);
-		}
-		if (this.dialog && this.show_resize) {
-			this.add_footer_toggle(
-				"canvas",
-				__("Canvas"),
-				"resize_enabled_default",
-				!!(this.resize_settings && this.resize_settings.resize_enabled),
-				null,
-				null,
-			);
-		}
+		// Note: the footer-toggle pills (Remove BG / Watermark / Comments /
+		// Canvas) have been removed. They are now rendered as tabs + toggle
+		// switches inside the uploader body's right-side panel, which keeps
+		// one source of truth for feature state across all 3 steps (file
+		// picker, cropper, post-crop list).
 	}
 
 	upload_files() {

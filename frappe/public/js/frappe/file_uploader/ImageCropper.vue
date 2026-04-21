@@ -151,22 +151,6 @@
 				</div>
 			</div>
 
-			<!-- Bottom action row: Back / Crop -->
-			<div class="image-cropper-actions" ref="actions">
-				<div><!-- spacer for flex layout; no left actions --></div>
-				<div>
-					<button
-						class="btn btn-sm margin-right"
-						@click="$emit('toggle_image_cropper')"
-						v-if="fixed_aspect_ratio == null"
-					>
-						{{ __("Back") }}
-					</button>
-					<button class="btn btn-primary btn-sm" :disabled="bg_processing" @click="crop_image">
-						{{ __("Crop") }}
-					</button>
-				</div>
-			</div>
 		</div>
 
 		<!-- RIGHT COLUMN: tabbed feature panel -->
@@ -633,6 +617,25 @@
 						</div>
 					</div>
 				</div>
+			</div>
+		</div>
+		<!-- Bottom action row spans both columns so Back / Crop sit in the
+		     same bottom-right corner the Upload button occupies on Step 1
+		     and Step 3 — consistent toolbar across the whole 3-step flow. -->
+		<div class="image-cropper-actions image-cropper-actions-bottom" ref="actions">
+			<div>
+				<button
+					class="btn btn-sm"
+					@click="$emit('toggle_image_cropper')"
+					v-if="fixed_aspect_ratio == null"
+				>
+					{{ __("Back") }}
+				</button>
+			</div>
+			<div>
+				<button class="btn btn-primary btn-sm" :disabled="bg_processing" @click="crop_image">
+					{{ __("Crop") }}
+				</button>
 			</div>
 		</div>
 	</div>
@@ -2230,9 +2233,13 @@ export default {
 .cropper-grid {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+	grid-template-rows: 1fr auto;
 	gap: 16px;
 	align-items: stretch;
 	min-height: 0;
+}
+.cropper-grid .image-cropper-actions-bottom {
+	grid-column: 1 / -1;
 }
 .cropper-left-col {
 	display: flex;
