@@ -66,6 +66,10 @@
 				</div>
 			</div>
 
+			<!-- Side-by-side workspace: cropper on the left, live preview
+			     on the right at 1:1 ratio. Stacks vertically on mobile via
+			     the media query below. -->
+			<div class="cropper-workspace">
 			<!-- Cropper canvas — main image with all overlays -->
 			<div
 				class="cropper-image-wrapper"
@@ -129,25 +133,29 @@
 				</div>
 			</div>
 
-			<!-- Preview — compact 400×400 thumb that matches the Item
-			     Image Batch row-thumbnail pattern. No outer card /
-			     header wrapper: the <el-image> is the whole thing,
-			     sitting directly in the left-col flex flow. Click
-			     opens Element UI's image-viewer lightbox. -->
-			<template v-if="any_feature_on">
+			<!-- Preview column: 1:1 with the cropper on desktop (side-by-side),
+			     stacked below on mobile. The title sits above el-image so
+			     the user clearly sees "this is the final output". -->
+			<div v-if="any_feature_on" class="cropper-preview-col">
+				<div class="cropper-preview-header">
+					<span class="cropper-preview-title">{{ __("Preview") }}</span>
+					<span v-if="bg_processing" class="cropper-preview-hint">{{ __("waiting for Remove BG…") }}</span>
+					<span v-else class="cropper-preview-hint">{{ __("final output after Crop") }}</span>
+				</div>
 				<canvas
 					ref="preview_canvas"
 					class="cropper-preview-canvas"
-					:class="{ 'el-image-backed': !!_preview_data_url }"
+					:class="{ 'el-image-backed': !!_preview_data_url && !bg_processing }"
 				></canvas>
 				<el-image
-					v-if="_preview_data_url"
+					v-if="_preview_data_url && !bg_processing"
 					class="cropper-preview-elimage"
 					:src="_preview_data_url"
 					:preview-src-list="[_preview_data_url]"
 					fit="contain"
 				/>
-			</template>
+			</div>
+			</div><!-- /.cropper-workspace -->
 
 		</div>
 
@@ -785,7 +793,29 @@ export default {
 		wm_tile_rotation() { this._schedule_preview_update(); },
 		wm_tile_spacing() { this._schedule_preview_update(); },
 		local_padding_pct() { this._schedule_preview_update(); },
-		bg_removed() { this._schedule_preview_update(); },
+		bg_removed() {
+			// Clear any stale preview immediately so the user doesn't see
+			// the pre-removal image while the new crop + composite runs.
+			// _schedule_preview_update is debounced (120ms) + cropper may
+			// still be swapping the underlying image — without this reset
+			// the user could briefly see the old Remove BG state.
+			this._preview_data_url = null;
+			this._schedule_preview_update();
+		},
+		bg_processing(processing) {
+			// Clear the preview while bg removal is in flight so
+			// _render_preview doesn't snapshot an inconsistent
+			// intermediate state (and _preview_data_url-based v-if gates
+			// the el-image + canvas.el-image-backed behavior).
+			if (processing) {
+				this._preview_data_url = null;
+			} else {
+				// When processing flips off, cropper.swap() has just
+				// bound the new image. Wait a tick for cropper's
+				// internal DOM to settle, then re-render preview.
+				this.$nextTick(() => this._schedule_preview_update());
+			}
+		},
 		comments_enabled() { this._schedule_preview_update(); },
 		comment_boxes: {
 			handler() { this._schedule_preview_update(); },
@@ -902,9 +932,44 @@ export default {
 				// Preview thumb's container changes size with the modal,
 				// so re-render the preview at the new resolution.
 				this._schedule_preview_update();
+				// CropperJS doesn't observe its own container element —
+				// it relies on window resize. When our wrapper changes
+				// size without a window resize (e.g. the side-by-side
+				// grid re-flows because the modal was opened at 0×0
+				// then laid out), we need to tell cropper to re-measure.
+				if (this.cropper) {
+					try { this.cropper.resize(); } catch (e) {}
+				}
 			});
 		};
 		window.addEventListener("resize", this._on_window_resize);
+
+		// Observe the cropper wrapper directly. CropperJS measures its
+		// container once on mount and doesn't auto-update when flex/grid
+		// layout shifts (e.g. the new .cropper-workspace grid finishes
+		// laying out after Vue's initial paint, leaving cropper with a
+		// 0-sized canvas that produces un-draggable / warped crop boxes).
+		// A ResizeObserver on the wrapper fixes both first-mount zero
+		// size AND devtools-triggered resizes.
+		if (typeof ResizeObserver !== "undefined" && this.$refs.wrapper) {
+			this._wrapper_ro = new ResizeObserver(() => {
+				if (!this.cropper) return;
+				// Debounce with rAF so rapid size changes don't thrash
+				// cropper.resize().
+				if (this._wrapper_ro_raf) return;
+				this._wrapper_ro_raf = requestAnimationFrame(() => {
+					this._wrapper_ro_raf = null;
+					try {
+						this.cropper.resize();
+					} catch (e) {}
+					if (this.wm_enabled && this.wm_loaded) {
+						this.wm_resize_canvas();
+					}
+					this._schedule_preview_update();
+				});
+			});
+			this._wrapper_ro.observe(this.$refs.wrapper);
+		}
 
 		// Mark the enclosing Bootstrap modal-body so our scoped CSS can enable
 		// internal scrolling — otherwise very tall images + section cards push
@@ -941,6 +1006,11 @@ export default {
 		document.removeEventListener("touchend", this._on_touchend);
 		window.removeEventListener("resize", this._on_window_resize);
 		if (this._resize_raf) cancelAnimationFrame(this._resize_raf);
+		if (this._wrapper_ro_raf) cancelAnimationFrame(this._wrapper_ro_raf);
+		if (this._wrapper_ro) {
+			try { this._wrapper_ro.disconnect(); } catch (e) {}
+			this._wrapper_ro = null;
+		}
 		if (this._modal_body_el) {
 			this._modal_body_el.classList.remove("image-cropper-modal-body");
 		}
@@ -2383,33 +2453,32 @@ img {
 	max-height: min(600px, calc(100vh - 320px));
 }
 
-/* ── Preview thumb below cropper ──────────────────────────────────
-   Bare 400×400 el-image, no outer card / header wrapper. Sits
-   directly in the left-col flex flow, left-aligned. Matches the
-   Item Image Batch row-thumbnail visual language (deep background,
-   rounded corners, zoom-on-hover). Click → Element UI image-viewer. */
+/* ── Preview (right half of workspace on desktop) ─────────────────
+   Fills the preview-col's remaining space after the header. Same
+   dark neutral background as the cropper, rounded corners, click
+   opens Element UI image-viewer (zoom / rotate / pan). */
 .cropper-preview-canvas,
 .cropper-preview-elimage {
-	align-self: flex-start;
-	width: 400px;
-	height: 400px;
-	flex-shrink: 0;
+	flex: 1 1 auto;
+	width: 100%;
+	min-height: 0;
 	border-radius: 8px;
 	background: #2c2c2c;
 	overflow: hidden;
 	display: block;
 	cursor: zoom-in;
-	transition: box-shadow 0.15s ease, transform 0.12s ease;
+	transition: box-shadow 0.15s ease;
 }
 .cropper-preview-canvas {
-	/* Fallback before el-image mounts with the first data URL. */
+	/* Fallback before the first data URL — canvas.toDataURL() writes
+	   to .style.width/height + .width/height inside _render_preview,
+	   so we keep those properties auto and just size the background. */
 	max-width: 100%;
 	max-height: 100%;
 }
 .cropper-preview-canvas.el-image-backed { display: none; }
 .cropper-preview-elimage:hover {
 	box-shadow: 0 0 0 2px var(--primary, #2563eb), 0 6px 14px rgba(37, 99, 235, 0.2);
-	transform: scale(1.01);
 }
 .cropper-preview-elimage >>> .el-image__inner {
 	object-fit: contain;
@@ -2614,26 +2683,29 @@ img {
 	font-weight: 500;
 }
 
-/* ── Mobile: stack left + right columns ──
-   Grid collapses to one column. Cropper stays dominant (~60vh),
-   preview becomes a compact row with a 160×160 thumb. Right panel
-   scrolls naturally with the page so user sees
-   cropper → preview → params → Crop. */
+/* ── Mobile: stack left + right columns + stack the workspace ──
+   At ≤900px the grid collapses to one column and the workspace
+   (cropper + preview) stacks vertically so each gets full width
+   of the narrow viewport. Cropper keeps ~50vh, preview ~35vh. */
 @media (max-width: 900px) {
 	.cropper-grid {
 		grid-template-columns: 1fr;
 		grid-template-rows: auto auto auto;
 		height: auto;
 	}
+	.cropper-workspace {
+		grid-template-columns: 1fr;
+		grid-template-rows: auto auto;
+		gap: 12px;
+	}
 	.cropper-left-col { min-height: 0; }
 	.cropper-image-wrapper {
-		flex: 0 0 auto;
-		min-height: 60vh;
+		min-height: 50vh;
 	}
 	.cropper-preview-canvas,
 	.cropper-preview-elimage {
-		width: 260px;
-		height: 260px;
+		height: 35vh;
+		max-height: 320px;
 	}
 	.cropper-right-col {
 		max-height: none;
@@ -2650,13 +2722,10 @@ img {
 	.segmented-tab { padding: 7px 12px; font-size: 13px; }
 }
 @media (max-width: 480px) {
-	/* Very small phones — smaller cropper + thumb to fit a single swipe. */
-	.cropper-image-wrapper { min-height: 50vh; }
+	/* Very small phones — both rows tighter. */
+	.cropper-image-wrapper { min-height: 40vh; }
 	.cropper-preview-canvas,
-	.cropper-preview-elimage {
-		width: 180px;
-		height: 180px;
-	}
+	.cropper-preview-elimage { height: 28vh; max-height: 240px; }
 }
 
 /* ── Unified Image Adjustments panel ──
@@ -2781,16 +2850,20 @@ img {
 	white-space: nowrap;
 }
 
-.cropper-image-wrapper {
-	position: relative;
-	/* Cropper dominates the left column — takes remaining height
-	   above the fixed-size preview thumb. Deep neutral background
-	   (Photopea / Figma palette) so both colored photos and
-	   transparent PNGs read clearly; PNG transparency shows as
-	   the same dark gray, and Canvas output with solid fill shows
-	   the fill color, making the two states easy to distinguish. */
+/* Workspace: cropper + preview side-by-side, 1:1 split on desktop
+   (matches Adobe Express / Remove.bg / Canva split-view pattern).
+   Stacks vertically under 900px via the media query below. */
+.cropper-workspace {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
 	flex: 1 1 auto;
 	min-height: 0;
+}
+.cropper-image-wrapper {
+	position: relative;
+	min-height: 0;
+	min-width: 0;
 	overflow: hidden;
 	background: #2c2c2c;
 	border-radius: 8px;
@@ -2799,6 +2872,29 @@ img {
 	max-width: 100%;
 	max-height: 100%;
 	display: block;
+}
+.cropper-preview-col {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+	min-height: 0;
+}
+.cropper-preview-header {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	flex-shrink: 0;
+}
+.cropper-preview-title {
+	font-weight: 600;
+	font-size: 15px;
+	color: #303133;
+}
+.cropper-preview-hint {
+	font-weight: 400;
+	font-size: 13px;
+	color: #94a3b8;
 }
 
 .cropper-image-wrapper.wm-mode {
