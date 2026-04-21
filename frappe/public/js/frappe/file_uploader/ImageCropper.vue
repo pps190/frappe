@@ -374,6 +374,13 @@
 									@input="wm_pos_y = parseFloat($event.target.value)" />
 								<span class="wm-slider-value">{{ Math.round(wm_pos_y) }}%</span>
 							</div>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Rotation") }}</label>
+								<input type="range" class="wm-slider" min="-180" max="180" step="5"
+									:value="wm_corner_rotation"
+									@input="wm_corner_rotation = parseFloat($event.target.value)" />
+								<span class="wm-slider-value">{{ Math.round(wm_corner_rotation) }}°</span>
+							</div>
 						</template>
 
 						<div class="wm-panel-actions">
@@ -673,6 +680,7 @@ export default {
 			wm_img: null,
 			wm_pos_x: 80,
 			wm_pos_y: 90,
+			wm_corner_rotation: 0,
 			wm_size: 20,
 			wm_opacity: 50,
 			wm_dragging: false,
@@ -745,6 +753,7 @@ export default {
 		wm_size() { this._schedule_preview_update(); },
 		wm_pos_x() { this._schedule_preview_update(); },
 		wm_pos_y() { this._schedule_preview_update(); },
+		wm_corner_rotation() { this._schedule_preview_update(); this.wm_redraw(); },
 		wm_mode() { this._schedule_preview_update(); },
 		wm_tile_size() { this._schedule_preview_update(); },
 		wm_tile_opacity() { this._schedule_preview_update(); },
@@ -790,6 +799,9 @@ export default {
 			// Corner params
 			this.wm_pos_x = this.watermark_settings.position_x || 80;
 			this.wm_pos_y = this.watermark_settings.position_y || 90;
+			this.wm_corner_rotation = this.watermark_settings.corner_rotation != null
+				? this.watermark_settings.corner_rotation
+				: 0;
 			this.wm_size = this.watermark_settings.size || 20;
 			this.wm_opacity = this.watermark_settings.opacity || 50;
 			// Tiled params
@@ -1148,9 +1160,18 @@ export default {
 					const draw_y = (wm_center_y - wm_h_full / 2 - crop_y) * scale_y;
 					const draw_w = wm_w_full * scale_x;
 					const draw_h = wm_h_full * scale_y;
+					const rot = (this.wm_corner_rotation || 0) * Math.PI / 180;
+					ctx.save();
 					ctx.globalAlpha = this.wm_opacity / 100;
+					if (rot) {
+						const cx = draw_x + draw_w / 2;
+						const cy = draw_y + draw_h / 2;
+						ctx.translate(cx, cy);
+						ctx.rotate(rot);
+						ctx.translate(-cx, -cy);
+					}
 					ctx.drawImage(this.wm_img, draw_x, draw_y, draw_w, draw_h);
-					ctx.globalAlpha = 1.0;
+					ctx.restore();
 				}
 			}
 
@@ -1755,9 +1776,20 @@ export default {
 				const draw_y = (wm_center_y - wm_h_full / 2 - crop_y) * scale_y;
 				const draw_w = wm_w_full * scale_x;
 				const draw_h = wm_h_full * scale_y;
+				const rot = (this.wm_corner_rotation || 0) * Math.PI / 180;
+				ctx.save();
 				ctx.globalAlpha = this.wm_opacity / 100;
+				if (rot) {
+					// Rotate around the watermark's center, matching PIL's
+					// rotate(-deg, expand=True) + recentre in _apply_watermark.
+					const cx = draw_x + draw_w / 2;
+					const cy = draw_y + draw_h / 2;
+					ctx.translate(cx, cy);
+					ctx.rotate(rot);
+					ctx.translate(-cx, -cy);
+				}
 				ctx.drawImage(this.wm_img, draw_x, draw_y, draw_w, draw_h);
-				ctx.globalAlpha = 1.0;
+				ctx.restore();
 			}
 		},
 
@@ -1885,6 +1917,16 @@ export default {
 		},
 		wm_draw_corner(ctx, cd) {
 			const r = this.wm_get_rect_in_container(cd);
+			const rot = (this.wm_corner_rotation || 0) * Math.PI / 180;
+			const cx = r.x + r.w / 2;
+			const cy = r.y + r.h / 2;
+
+			ctx.save();
+			if (rot) {
+				ctx.translate(cx, cy);
+				ctx.rotate(rot);
+				ctx.translate(-cx, -cy);
+			}
 			ctx.globalAlpha = this.wm_opacity / 100;
 			ctx.drawImage(this.wm_img, r.x, r.y, r.w, r.h);
 			ctx.globalAlpha = 1.0;
@@ -1913,6 +1955,7 @@ export default {
 					ctx.fillRect(hx - handle / 2, hy - handle / 2, handle, handle);
 				});
 			}
+			ctx.restore();
 		},
 		wm_draw_tiled(ctx, cd) {
 			const tile_w = (this.wm_tile_size / 100) * cd.width;
@@ -2113,6 +2156,7 @@ export default {
 							mode: this.wm_mode,
 							position_x: Math.round(this.wm_pos_x * 10) / 10,
 							position_y: Math.round(this.wm_pos_y * 10) / 10,
+							corner_rotation: Math.round(this.wm_corner_rotation || 0),
 							size: Math.round(this.wm_size * 10) / 10,
 							opacity: this.wm_opacity,
 							tile_size: Math.round(this.wm_tile_size * 10) / 10,
@@ -2127,6 +2171,7 @@ export default {
 						mode: this.wm_mode,
 						position_x: this.wm_pos_x,
 						position_y: this.wm_pos_y,
+						corner_rotation: this.wm_corner_rotation || 0,
 						size: this.wm_size,
 						opacity: this.wm_opacity,
 						tile_size: this.wm_tile_size,
@@ -2146,6 +2191,7 @@ export default {
 				this.wm_mode = s.mode || "Corner";
 				this.wm_pos_x = s.position_x || 80;
 				this.wm_pos_y = s.position_y || 90;
+				this.wm_corner_rotation = s.corner_rotation != null ? s.corner_rotation : 0;
 				this.wm_size = s.size || 20;
 				this.wm_opacity = s.opacity || 50;
 				this.wm_tile_size = s.tile_size || 15;
