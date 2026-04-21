@@ -1,8 +1,10 @@
 <template>
 	<div>
-		<!-- Interaction-mode switcher: Corner mode only (Tiled has no drag target). -->
+		<!-- Interaction-mode switcher: shown when multiple drag targets exist
+		     (watermark Corner OR comments enabled). Lets the user pick which
+		     overlay they're dragging. -->
 		<div
-			v-if="show_watermark && wm_enabled && wm_loaded && wm_mode === 'Corner'"
+			v-if="(show_watermark && wm_enabled && wm_loaded && wm_mode === 'Corner') || (show_comments && comments_enabled && comment_boxes.length > 0)"
 			class="interaction-switcher"
 		>
 			<span class="interaction-switcher-label">{{ __("Drag on image") }}</span>
@@ -19,6 +21,7 @@
 					{{ __("Crop box") }}
 				</button>
 				<button
+					v-if="show_watermark && wm_enabled && wm_loaded && wm_mode === 'Corner'"
 					class="segmented-tab"
 					:class="{ active: interaction_mode === 'watermark' }"
 					role="tab"
@@ -29,6 +32,20 @@
 					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
 					{{ __("Watermark") }}
 				</button>
+				<button
+					v-if="show_comments && comments_enabled && comment_boxes.length > 0"
+					class="segmented-tab"
+					:class="{ active: interaction_mode === 'comment' }"
+					role="tab"
+					:aria-selected="interaction_mode === 'comment'"
+					:title="__('Drag to move text comments')"
+					@click="set_mode('comment')"
+				>
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+					</svg>
+					{{ __("Comment") }}
+				</button>
 			</div>
 		</div>
 
@@ -37,6 +54,7 @@
 			ref="wrapper"
 			:class="{
 				'wm-mode': interaction_mode === 'watermark' && wm_mode === 'Corner',
+				'comment-mode': interaction_mode === 'comment',
 				'bg-processing': bg_processing,
 			}"
 			@mousedown="on_wrapper_mousedown"
@@ -50,6 +68,32 @@
 				class="watermark-overlay-canvas"
 				:style="{ pointerEvents: (interaction_mode === 'watermark' && wm_mode === 'Corner') ? 'auto' : 'none' }"
 			></canvas>
+			<!-- Comment overlay: DOM boxes drawn on top of the image so user
+			     can see text positioning + drag them. Uses CropperJS image
+			     data to convert percentages → screen pixels. -->
+			<div
+				v-if="show_comments && comments_enabled"
+				class="comment-overlay"
+				:style="comment_overlay_style"
+			>
+				<div
+					v-for="(box, i) in comment_boxes"
+					:key="'overlay-box-' + i"
+					class="comment-overlay-box"
+					:class="{
+						selected: selected_comment_idx === i,
+						dragging: comment_dragging_idx === i,
+					}"
+					:style="comment_box_style(box)"
+					:data-box-idx="i"
+					@mousedown.stop="on_comment_mousedown($event, i)"
+					@touchstart.stop="on_comment_touchstart($event, i)"
+				>
+					<div class="comment-overlay-text" :style="comment_text_style(box)">
+						{{ box.text || __('(empty)') }}
+					</div>
+				</div>
+			</div>
 			<div v-if="bg_processing" class="cropper-loading-overlay">
 				<div class="cropper-spinner"></div>
 				<div class="cropper-loading-text">{{ __("Removing background...") }}</div>
@@ -125,18 +169,27 @@
 					</div>
 				</div>
 				<div class="resize-misc-row">
-					<label class="resize-inline-field">
-						<span>{{ __("Fill") }}</span>
+					<label class="resize-inline-toggle">
+						<input type="checkbox" v-model="resize_flatten_rgb" />
+						<span>{{ __("Solid background") }}</span>
+					</label>
+					<label
+						v-if="resize_flatten_rgb"
+						class="resize-inline-field"
+					>
+						<span>{{ __("Background color") }}</span>
 						<input
 							type="color"
 							class="resize-color"
 							v-model="resize_fill_color"
 						/>
 					</label>
-					<label class="resize-inline-toggle">
-						<input type="checkbox" v-model="resize_flatten_rgb" />
-						<span>{{ __("Flatten RGB") }}</span>
-					</label>
+					<span
+						v-if="!resize_flatten_rgb"
+						class="resize-hint"
+					>
+						{{ __("Transparent background (PNG)") }}
+					</span>
 				</div>
 			</div>
 
@@ -163,6 +216,8 @@
 					v-for="(box, i) in comment_boxes"
 					:key="'box-' + i"
 					class="comment-entry"
+					:class="{ 'comment-entry-selected': selected_comment_idx === i }"
+					@click="selected_comment_idx = i"
 				>
 					<div class="comment-entry-header">
 						<span class="comment-entry-idx">#{{ i + 1 }}</span>
@@ -177,10 +232,21 @@
 							type="button"
 							class="btn btn-xs btn-danger comment-delete"
 							:title="__('Delete comment')"
-							@click="_delete_comment(i)"
+							@click.stop="_delete_comment(i)"
 						>×</button>
 					</div>
+
+					<!-- Row 1: Font family + Size + style toggles -->
 					<div class="comment-entry-controls">
+						<label class="comment-control comment-control-wide">
+							<span>{{ __("Font") }}</span>
+							<select class="wm-input comment-font-select"
+								:value="box.font_family"
+								@change="_update_comment(i, 'font_family', $event.target.value)"
+							>
+								<option v-for="f in comment_font_families" :key="f" :value="f">{{ f }}</option>
+							</select>
+						</label>
 						<label class="comment-control">
 							<span>{{ __("Size %") }}</span>
 							<input type="number" class="wm-input comment-num-input"
@@ -189,6 +255,40 @@
 								@input="_update_comment(i, 'font_size_pct', parseFloat($event.target.value) || 5.0)"
 							/>
 						</label>
+						<button
+							type="button"
+							class="comment-style-btn"
+							:class="{ active: box.font_weight === 'Bold' }"
+							:title="__('Bold')"
+							@click="_update_comment(i, 'font_weight', box.font_weight === 'Bold' ? 'Normal' : 'Bold')"
+						><strong>B</strong></button>
+						<button
+							type="button"
+							class="comment-style-btn"
+							:class="{ active: box.font_style === 'Italic' }"
+							:title="__('Italic')"
+							@click="_update_comment(i, 'font_style', box.font_style === 'Italic' ? 'Normal' : 'Italic')"
+						><em>I</em></button>
+						<input type="color" class="comment-color-input"
+							:title="__('Text color')"
+							:value="box.color"
+							@input="_update_comment(i, 'color', $event.target.value)"
+						/>
+					</div>
+
+					<!-- Row 2: Alignment + position -->
+					<div class="comment-entry-controls">
+						<div class="comment-align-group">
+							<button
+								v-for="a in ['Left', 'Center', 'Right']"
+								:key="'align-' + a"
+								type="button"
+								class="comment-align-btn"
+								:class="{ active: box.align === a }"
+								:title="__(a)"
+								@click="_update_comment(i, 'align', a)"
+							>{{ a.charAt(0) }}</button>
+						</div>
 						<label class="comment-control">
 							<span>X%</span>
 							<input type="number" class="wm-input comment-num-input"
@@ -206,16 +306,11 @@
 							/>
 						</label>
 						<label class="comment-control">
-							<input type="checkbox"
-								:checked="box.font_weight === 'Bold'"
-								@change="_update_comment(i, 'font_weight', $event.target.checked ? 'Bold' : 'Normal')"
-							/>
-							<span>B</span>
-						</label>
-						<label class="comment-control">
-							<input type="color"
-								:value="box.color"
-								@input="_update_comment(i, 'color', $event.target.value)"
+							<span>W%</span>
+							<input type="number" class="wm-input comment-num-input"
+								min="5" max="100" step="1"
+								:value="Math.round(box.width_pct)"
+								@input="_update_comment(i, 'width_pct', parseFloat($event.target.value) || 5)"
 							/>
 						</label>
 					</div>
@@ -243,6 +338,15 @@
 							{{ p.text || __("(no text)") }}
 						</div>
 					</div>
+				</div>
+
+				<div class="wm-panel-actions">
+					<button class="btn btn-xs btn-default" @click="_reset_comments_to_defaults">
+						{{ __("Reset") }}
+					</button>
+					<button class="btn btn-xs btn-primary-light" @click="_save_comment_defaults">
+						{{ __("Save Style as Default") }}
+					</button>
 				</div>
 			</div>
 
@@ -561,13 +665,22 @@ export default {
 			// change so the user sees exactly what Crop will produce.
 			preview_dims: null,
 			_preview_debounce: null,
-			// Comments (new 2026-04) — simple list baked into the final
-			// Canvas composite. No drag UI here; edits via textarea + number
-			// inputs. For the full drag/resize experience, use the Item
-			// Image Batch.
+			// Comments (new 2026-04) — list of text overlays baked into
+			// the final Canvas composite. Overlay DOM boxes on top of the
+			// cropper image for drag interaction.
 			comments_enabled: false,
 			comment_boxes: [],
 			preset_menu_open: false,
+			selected_comment_idx: -1,
+			comment_dragging_idx: -1,
+			_comment_drag_start: null,
+			// Canvas data cache (image display rect in cropper wrapper)
+			// updated on cropper ready + crop event for overlay positioning.
+			_canvas_data: null,
+			comment_font_families: [
+				"Arial", "Helvetica", "Times New Roman",
+				"Courier New", "Georgia", "Verdana",
+			],
 		};
 	},
 	watch: {
@@ -664,6 +777,19 @@ export default {
 		document.addEventListener("touchmove", this._on_touchmove, { passive: false });
 		document.addEventListener("touchend", this._on_touchend);
 
+		// Global listeners for comment drag (new 2026-04)
+		this._on_comment_mm = this._on_comment_mousemove.bind(this);
+		this._on_comment_mu = this._on_comment_mouseup.bind(this);
+		document.addEventListener("mousemove", this._on_comment_mm);
+		document.addEventListener("mouseup", this._on_comment_mu);
+		document.addEventListener("touchmove", (e) => {
+			if (this.comment_dragging_idx < 0) return;
+			const t = e.touches[0];
+			this._on_comment_mousemove({ clientX: t.clientX, clientY: t.clientY });
+			e.preventDefault();
+		}, { passive: false });
+		document.addEventListener("touchend", this._on_comment_mu);
+
 		// When the viewport or the modal itself resizes, the CropperJS canvas
 		// re-layouts automatically via its built-in listener, but our watermark
 		// overlay canvas sits on top and needs to be resized + redrawn manually.
@@ -708,6 +834,8 @@ export default {
 	beforeDestroy() {
 		document.removeEventListener("mousemove", this._on_mousemove);
 		document.removeEventListener("mouseup", this._on_mouseup);
+		if (this._on_comment_mm) document.removeEventListener("mousemove", this._on_comment_mm);
+		if (this._on_comment_mu) document.removeEventListener("mouseup", this._on_comment_mu);
 		document.removeEventListener("touchmove", this._on_touchmove);
 		document.removeEventListener("touchend", this._on_touchend);
 		window.removeEventListener("resize", this._on_window_resize);
@@ -732,6 +860,24 @@ export default {
 			if (this.local_padding_pct != null) return this.local_padding_pct;
 			const p = Number(this.remove_bg_padding_pct);
 			return Number.isFinite(p) ? p : 2;
+		},
+
+		// Comment overlay sits on top of the image display area (NOT
+		// the cropper wrapper as a whole). Position it via the cropper's
+		// getCanvasData() output so it tracks zoom + pan.
+		comment_overlay_style() {
+			const cd = this._canvas_data;
+			if (!cd) return { display: "none" };
+			return {
+				position: "absolute",
+				left: cd.left + "px",
+				top: cd.top + "px",
+				width: cd.width + "px",
+				height: cd.height + "px",
+				// pointerEvents only active when user is in comment mode,
+				// so watermark + crop drag still work from the same pixels.
+				pointerEvents: this.interaction_mode === "comment" ? "auto" : "none",
+			};
 		},
 	},
 	methods: {
@@ -774,6 +920,7 @@ export default {
 						if (this.wm_enabled && this.wm_loaded) {
 							this.$nextTick(() => this.wm_resize_canvas());
 						}
+						this._update_canvas_data();
 						// Initial preview render once cropper is ready
 						this.$nextTick(() => this._schedule_preview_update());
 					},
@@ -781,6 +928,7 @@ export default {
 						if (this.wm_enabled && this.wm_loaded) {
 							this.$nextTick(() => this.wm_draw());
 						}
+						this._update_canvas_data();
 						// Preview follows the crop box — user dragging
 						// the frame updates the preview live (debounced).
 						this._schedule_preview_update();
@@ -1068,6 +1216,149 @@ export default {
 		},
 
 		// ── Comments (new 2026-04) ──
+		// Per-box style computations for the DOM overlay on the image.
+		comment_box_style(box) {
+			// Percentage-based position + size. Absolute inside the
+			// .comment-overlay container which is already sized to match
+			// the cropper image display rect.
+			const leftPct = (box.position_x_pct || 50) - (box.width_pct || 40) / 2;
+			const topPct = (box.position_y_pct || 50) - (box.height_pct || 10) / 2;
+			return {
+				position: "absolute",
+				left: leftPct + "%",
+				top: topPct + "%",
+				width: (box.width_pct || 40) + "%",
+				height: (box.height_pct || 10) + "%",
+			};
+		},
+		comment_text_style(box) {
+			const cd = this._canvas_data;
+			// Compute px font size from the displayed image height, not
+			// the natural size (so on-screen text matches what user sees
+			// in the preview).
+			const displayH = (cd && cd.height) ? cd.height : 200;
+			const fontPx = Math.max(6, Math.round(displayH * (box.font_size_pct || 5.0) / 100));
+			return {
+				fontFamily: `"${box.font_family || "Arial"}", sans-serif`,
+				fontSize: fontPx + "px",
+				fontWeight: box.font_weight === "Bold" ? "700" : "400",
+				fontStyle: box.font_style === "Italic" ? "italic" : "normal",
+				color: box.color || "#000000",
+				textAlign: (box.align || "Center").toLowerCase(),
+			};
+		},
+
+		// Refresh canvas data cache so overlay positions track cropper
+		// zoom/pan. Called from cropper ready + crop events.
+		_update_canvas_data() {
+			if (!this.cropper) return;
+			try {
+				this._canvas_data = this.cropper.getCanvasData();
+			} catch (e) {
+				this._canvas_data = null;
+			}
+		},
+
+		// ── Comment drag handlers ──
+		on_comment_mousedown(e, i) {
+			if (this.interaction_mode !== "comment") return;
+			this.selected_comment_idx = i;
+			this.comment_dragging_idx = i;
+			const box = this.comment_boxes[i];
+			this._comment_drag_start = {
+				clientX: e.clientX,
+				clientY: e.clientY,
+				origXPct: box.position_x_pct,
+				origYPct: box.position_y_pct,
+			};
+			e.preventDefault();
+		},
+		on_comment_touchstart(e, i) {
+			if (this.interaction_mode !== "comment") return;
+			const t = e.touches[0];
+			this.selected_comment_idx = i;
+			this.comment_dragging_idx = i;
+			const box = this.comment_boxes[i];
+			this._comment_drag_start = {
+				clientX: t.clientX,
+				clientY: t.clientY,
+				origXPct: box.position_x_pct,
+				origYPct: box.position_y_pct,
+			};
+		},
+		_on_comment_mousemove(e) {
+			if (this.comment_dragging_idx < 0 || !this._comment_drag_start) return;
+			const cd = this._canvas_data;
+			if (!cd) return;
+			const start = this._comment_drag_start;
+			const dx = e.clientX - start.clientX;
+			const dy = e.clientY - start.clientY;
+			const dxPct = (dx / cd.width) * 100;
+			const dyPct = (dy / cd.height) * 100;
+			const i = this.comment_dragging_idx;
+			const box = this.comment_boxes[i];
+			if (!box) return;
+			const newX = Math.max(0, Math.min(100, start.origXPct + dxPct));
+			const newY = Math.max(0, Math.min(100, start.origYPct + dyPct));
+			this.$set(this.comment_boxes, i, {
+				...box,
+				position_x_pct: newX,
+				position_y_pct: newY,
+			});
+		},
+		_on_comment_mouseup() {
+			if (this.comment_dragging_idx >= 0) {
+				this.comment_dragging_idx = -1;
+				this._comment_drag_start = null;
+			}
+		},
+
+		// ── Reset / save comment-style defaults ──
+		_reset_comments_to_defaults() {
+			if (!this.comment_boxes.length) return;
+			const d = this.comment_defaults || {};
+			for (let i = 0; i < this.comment_boxes.length; i++) {
+				const box = this.comment_boxes[i];
+				this.$set(this.comment_boxes, i, {
+					...box,
+					font_family: d.font_family || "Arial",
+					font_size_pct: d.font_size_pct || 5.0,
+					font_weight: d.font_weight || "Normal",
+					font_style: d.font_style || "Normal",
+					color: d.color || "#000000",
+					align: d.align || "Center",
+				});
+			}
+		},
+		_save_comment_defaults() {
+			// Save the currently-selected box's style (or box #1's if none
+			// selected) as the new system-wide default via the Settings API.
+			const idx = this.selected_comment_idx >= 0 ? this.selected_comment_idx : 0;
+			const box = this.comment_boxes[idx];
+			if (!box) {
+				frappe.show_alert({ message: __("No comment to save as default"), indicator: "orange" });
+				return;
+			}
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Image Processing Settings",
+					name: "Image Processing Settings",
+					fieldname: {
+						default_comment_font_family: box.font_family,
+						default_comment_font_size_pct: box.font_size_pct,
+						default_comment_font_weight: box.font_weight,
+						default_comment_font_style: box.font_style,
+						default_comment_color: box.color,
+						default_comment_align: box.align,
+					},
+				},
+				callback: () => {
+					frappe.show_alert({ message: __("Comment style saved as default"), indicator: "green" });
+				},
+			});
+		},
+
 		_add_comment() {
 			const d = this.comment_defaults || {};
 			this.comment_boxes.push({
@@ -1487,11 +1778,14 @@ export default {
 		set_mode(mode) {
 			this.interaction_mode = mode;
 			if (this.cropper) {
-				// Disable/enable CropperJS drag based on mode
-				if (mode === "watermark") {
-					this.cropper.setDragMode("none");
-				} else {
+				// Disable CropperJS drag in non-crop modes so the
+				// overlay elements (watermark canvas / comment DOM
+				// boxes) can capture mouse events without the crop
+				// box stealing them.
+				if (mode === "crop") {
 					this.cropper.setDragMode("crop");
+				} else {
+					this.cropper.setDragMode("none");
 				}
 			}
 			// Repaint watermark so the corner outline picks up the new active state.
@@ -2324,6 +2618,120 @@ img {
 }
 .comment-preset-item:last-child {
 	border-bottom: none;
+}
+
+/* Draggable comment box overlay on the cropper image (new 2026-04) */
+.comment-overlay {
+	pointer-events: none;
+}
+.comment-overlay-box {
+	position: absolute;
+	border: 1px dashed rgba(59, 130, 246, 0.5);
+	box-sizing: border-box;
+	user-select: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	background: rgba(255, 255, 255, 0.02);
+}
+.cropper-image-wrapper.comment-mode .comment-overlay-box {
+	cursor: move;
+	border-color: rgba(59, 130, 246, 0.75);
+	border-style: solid;
+	background: rgba(59, 130, 246, 0.04);
+}
+.cropper-image-wrapper.comment-mode .comment-overlay-box:hover {
+	background: rgba(59, 130, 246, 0.12);
+}
+.comment-overlay-box.selected {
+	border: 2px solid #3b82f6;
+}
+.comment-overlay-box.dragging {
+	opacity: 0.85;
+}
+.comment-overlay-text {
+	width: 100%;
+	padding: 2px 4px;
+	line-height: 1.15;
+	word-break: break-word;
+	white-space: pre-wrap;
+	overflow: hidden;
+	text-overflow: clip;
+}
+
+/* Enhanced comment entry controls */
+.comment-control-wide {
+	flex: 1;
+	min-width: 130px;
+}
+.comment-font-select {
+	font-size: 11px;
+	padding: 2px 4px;
+	width: 100%;
+}
+.comment-style-btn {
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: 1px solid #cbd5e1;
+	border-radius: 3px;
+	background: #fff;
+	cursor: pointer;
+	font-size: 12px;
+	line-height: 1;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+.comment-style-btn.active {
+	background: #3b82f6;
+	color: #fff;
+	border-color: #3b82f6;
+}
+.comment-style-btn:hover:not(.active) {
+	background: #ecf5ff;
+}
+.comment-color-input {
+	width: 28px;
+	height: 26px;
+	padding: 0;
+	border: 1px solid #cbd5e1;
+	border-radius: 3px;
+	cursor: pointer;
+}
+.comment-align-group {
+	display: inline-flex;
+	border: 1px solid #cbd5e1;
+	border-radius: 3px;
+	overflow: hidden;
+}
+.comment-align-btn {
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: none;
+	background: #fff;
+	cursor: pointer;
+	font-size: 11px;
+	font-weight: 600;
+	border-right: 1px solid #cbd5e1;
+}
+.comment-align-btn:last-child {
+	border-right: none;
+}
+.comment-align-btn.active {
+	background: #3b82f6;
+	color: #fff;
+}
+.comment-entry-selected {
+	border-color: #3b82f6 !important;
+	box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+}
+.resize-hint {
+	font-size: 11px;
+	color: #94a3b8;
+	font-style: italic;
 }
 </style>
 
