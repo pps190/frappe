@@ -2160,8 +2160,15 @@ export default {
 }
 .file-uploader-dialog .modal-body {
 	flex: 1 1 auto;
+	min-height: 0;
 	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
 }
+/* When the ImageCropper mounts, its .cropper-grid should fill the body so
+   the left column can distribute height (toolbar / image / preview). */
+.file-uploader-dialog .modal-body > .file-uploader { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.file-uploader-dialog .modal-body > .file-uploader > .cropper-grid { flex: 1 1 auto; min-height: 0; }
 /* Footer region — standard-actions holds the primary Upload button,
    custom-actions holds the feature toggles (Watermark / Remove BG
    pills). Space them properly so they don't collide, and wrap on

@@ -170,9 +170,9 @@
 					@click="active_tab = 'remove_bg'"
 				>
 					<span class="cropper-feature-tab-label">{{ __("Remove BG") }}</span>
-					<span class="cropper-feature-tab-state" :class="bg_removed ? 'on' : 'off'">
+					<span class="cropper-feature-tab-state" :class="(bg_removed || bg_processing) ? 'on' : 'off'">
 						<span class="cropper-feature-tab-dot"></span>
-						{{ bg_removed ? __("on") : __("off") }}
+						{{ bg_processing ? __("…") : (bg_removed ? __("on") : __("off")) }}
 					</span>
 				</button>
 				<button
@@ -1788,8 +1788,9 @@ export default {
 				? this._apply_output_shape(work)
 				: work;
 
-			// Compute display box: letterbox into 200×200 preserving aspect
-			const MAX = 200;
+			// Compute display box: letterbox into 280×280 preserving aspect
+			// (matches the 140px CSS-displayed canvas at 2× device pixel ratio).
+			const MAX = 280;
 			const ratio = final_canvas.width / final_canvas.height;
 			let disp_w, disp_h;
 			if (ratio >= 1) {
@@ -2289,10 +2290,11 @@ export default {
 .cropper-grid {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) 420px;
-	grid-template-rows: 1fr auto;
+	grid-template-rows: minmax(0, 1fr) auto;
 	gap: 20px;
 	align-items: stretch;
 	min-height: 0;
+	height: 100%;
 }
 .cropper-grid .image-cropper-actions-bottom {
 	grid-column: 1 / -1;
@@ -2309,6 +2311,8 @@ export default {
 	gap: 10px;
 	min-width: 0;
 	min-height: 0;
+	max-height: 100%;
+	overflow-y: auto;
 }
 
 /* ── Top toolbar (drag mode + crop ratio, above the cropper) ── */
@@ -2347,19 +2351,20 @@ img {
 .cropper-preview-bar {
 	display: flex;
 	gap: 16px;
-	padding: 10px 14px;
+	padding: 12px 14px;
 	margin-top: 10px;
 	border: 1px solid var(--border-color);
 	border-radius: 8px;
 	background: var(--fg-color, white);
 	align-items: center;
+	flex-shrink: 0;
 }
 .cropper-preview-thumb {
 	flex-shrink: 0;
 }
 .cropper-preview-thumb canvas {
-	width: 72px;
-	height: 72px;
+	width: 140px;
+	height: 140px;
 	border: 1px solid var(--border-color);
 	background: #ffffff;
 	background-image:
@@ -2369,15 +2374,16 @@ img {
 		linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
 	background-size: 12px 12px;
 	background-position: 0 0, 0 6px, 6px -6px, -6px 0;
-	border-radius: 4px;
+	border-radius: 6px;
 	display: block;
 }
 .cropper-preview-dims {
-	margin-top: 4px;
-	font-size: 10px;
+	margin-top: 6px;
+	font-size: 12px;
 	color: #64748b;
 	text-align: center;
 	font-variant-numeric: tabular-nums;
+	font-weight: 500;
 }
 .cropper-preview-body {
 	flex: 1;
@@ -2385,13 +2391,13 @@ img {
 }
 .cropper-preview-title {
 	font-weight: 600;
-	font-size: 13px;
+	font-size: 15px;
 	color: #303133;
 }
 .cropper-preview-hint {
 	margin-left: 6px;
 	font-weight: 400;
-	font-size: 11px;
+	font-size: 13px;
 	color: #94a3b8;
 }
 .cropper-preview-chips {
@@ -2732,6 +2738,15 @@ img {
 
 .cropper-image-wrapper {
 	position: relative;
+	flex: 1 1 auto;
+	min-height: 0;
+	max-height: 60vh;   /* leave room for preview + bottom action bar */
+	overflow: hidden;
+}
+.cropper-image-wrapper img {
+	max-width: 100%;
+	max-height: 100%;
+	display: block;
 }
 
 .cropper-image-wrapper.wm-mode {
