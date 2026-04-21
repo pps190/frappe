@@ -264,7 +264,9 @@
 				</div>
 			</template>
 
-			<!-- Step 1 (no files yet): interactive 4-tab panel -->
+			<!-- Step 1 (no files yet): interactive 4-tab panel — full
+			     editable params, mirroring the cropper's right panel so
+			     users can set their defaults before picking a file. -->
 			<template v-else>
 				<div class="fu-feature-tabs" role="tablist">
 					<button
@@ -286,7 +288,7 @@
 				</div>
 
 				<div class="fu-tab-body">
-					<!-- REMOVE BG pane -->
+					<!-- ── REMOVE BG pane ── -->
 					<div v-show="active_tab === 'remove_bg'" class="fu-tab-pane">
 						<div class="fu-tab-enable">
 							<span class="fu-tab-enable-label">{{ __("Enable Remove Background") }}</span>
@@ -304,12 +306,18 @@
 							{{ remove_bg_disabled_hint }}
 							<a v-if="remove_bg_disabled_link" :href="remove_bg_disabled_link">{{ __("Configure") }}</a>
 						</div>
-						<div v-else class="fu-tab-note">
-							{{ __("Auto-crop padding + mask preview available after adding a file.") }}
-						</div>
+						<template v-else>
+							<div class="fu-slider-row">
+								<label class="fu-slider-label">{{ __("Auto-crop padding") }}</label>
+								<input type="range" class="fu-slider" min="-20" max="40" step="1"
+									:value="step1_padding_pct"
+									@input="step1_padding_pct = parseInt($event.target.value)" />
+								<span class="fu-slider-value">{{ step1_padding_pct }}%</span>
+							</div>
+						</template>
 					</div>
 
-					<!-- WATERMARK pane -->
+					<!-- ── WATERMARK pane ── -->
 					<div v-show="active_tab === 'watermark'" class="fu-tab-pane">
 						<div class="fu-tab-enable">
 							<span class="fu-tab-enable-label">{{ __("Enable Watermark") }}</span>
@@ -327,12 +335,89 @@
 							{{ __("No watermark image uploaded.") }}
 							<a href="/app/watermark-settings">{{ __("Configure") }}</a>
 						</div>
-						<div v-else class="fu-tab-note">
-							{{ __("Mode: {0}. Position, size and rotation are editable in the Crop step.", [(watermark_settings && watermark_settings.mode) || "Tiled"]) }}
-						</div>
+						<template v-else-if="wm_enabled">
+							<div class="fu-tab-field">
+								<label class="fu-tab-field-label">{{ __("Mode") }}</label>
+								<div class="fu-seg-row">
+									<button type="button" class="fu-seg-btn"
+										:class="{ active: (watermark_settings.mode || 'Tiled') === 'Tiled' }"
+										@click="_set_wm_field('mode', 'Tiled')">{{ __("Tiled") }}</button>
+									<button type="button" class="fu-seg-btn"
+										:class="{ active: watermark_settings.mode === 'Corner' }"
+										@click="_set_wm_field('mode', 'Corner')">{{ __("Corner") }}</button>
+								</div>
+							</div>
+							<template v-if="(watermark_settings.mode || 'Tiled') === 'Tiled'">
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Opacity") }}</label>
+									<input type="range" class="fu-slider" min="5" max="100"
+										:value="watermark_settings.tile_opacity || 12"
+										@input="_set_wm_field('tile_opacity', parseInt($event.target.value))" />
+									<span class="fu-slider-value">{{ watermark_settings.tile_opacity || 12 }}%</span>
+								</div>
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Tile Size") }}</label>
+									<input type="range" class="fu-slider" min="5" max="80"
+										:value="watermark_settings.tile_size || 15"
+										@input="_set_wm_field('tile_size', parseFloat($event.target.value))" />
+									<span class="fu-slider-value">{{ Math.round(watermark_settings.tile_size || 15) }}%</span>
+								</div>
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Rotation") }}</label>
+									<input type="range" class="fu-slider" min="-180" max="180"
+										:value="watermark_settings.tile_rotation != null ? watermark_settings.tile_rotation : -30"
+										@input="_set_wm_field('tile_rotation', parseInt($event.target.value))" />
+									<span class="fu-slider-value">{{ watermark_settings.tile_rotation != null ? watermark_settings.tile_rotation : -30 }}°</span>
+								</div>
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Spacing") }}</label>
+									<input type="range" class="fu-slider" min="0" max="100"
+										:value="watermark_settings.tile_spacing || 40"
+										@input="_set_wm_field('tile_spacing', parseInt($event.target.value))" />
+									<span class="fu-slider-value">{{ watermark_settings.tile_spacing || 40 }}%</span>
+								</div>
+							</template>
+							<template v-else>
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Opacity") }}</label>
+									<input type="range" class="fu-slider" min="5" max="100"
+										:value="watermark_settings.opacity || 50"
+										@input="_set_wm_field('opacity', parseInt($event.target.value))" />
+									<span class="fu-slider-value">{{ watermark_settings.opacity || 50 }}%</span>
+								</div>
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Size") }}</label>
+									<input type="range" class="fu-slider" min="5" max="100"
+										:value="watermark_settings.size || 20"
+										@input="_set_wm_field('size', parseFloat($event.target.value))" />
+									<span class="fu-slider-value">{{ Math.round(watermark_settings.size || 20) }}%</span>
+								</div>
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Position X") }}</label>
+									<input type="range" class="fu-slider" min="0" max="100"
+										:value="watermark_settings.position_x || 80"
+										@input="_set_wm_field('position_x', parseFloat($event.target.value))" />
+									<span class="fu-slider-value">{{ Math.round(watermark_settings.position_x || 80) }}%</span>
+								</div>
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Position Y") }}</label>
+									<input type="range" class="fu-slider" min="0" max="100"
+										:value="watermark_settings.position_y || 90"
+										@input="_set_wm_field('position_y', parseFloat($event.target.value))" />
+									<span class="fu-slider-value">{{ Math.round(watermark_settings.position_y || 90) }}%</span>
+								</div>
+								<div class="fu-slider-row">
+									<label class="fu-slider-label">{{ __("Rotation") }}</label>
+									<input type="range" class="fu-slider" min="-180" max="180" step="5"
+										:value="watermark_settings.corner_rotation || 0"
+										@input="_set_wm_field('corner_rotation', parseFloat($event.target.value))" />
+									<span class="fu-slider-value">{{ Math.round(watermark_settings.corner_rotation || 0) }}°</span>
+								</div>
+							</template>
+						</template>
 					</div>
 
-					<!-- COMMENTS pane -->
+					<!-- ── COMMENTS pane ── -->
 					<div v-show="active_tab === 'comments'" class="fu-tab-pane">
 						<div class="fu-tab-enable">
 							<span class="fu-tab-enable-label">{{ __("Enable Comments") }}</span>
@@ -346,12 +431,56 @@
 								</span>
 							</div>
 						</div>
-						<div class="fu-tab-note">
-							{{ __("Add, position and style text overlays in the Crop step.") }}
-						</div>
+						<template v-if="comments_enabled_default && comment_defaults">
+							<div class="fu-tab-note">{{ __("Default style for new comment boxes:") }}</div>
+							<div class="fu-tab-field">
+								<label class="fu-tab-field-label">{{ __("Font") }}</label>
+								<select class="fu-select"
+									:value="comment_defaults.font_family || 'Arial'"
+									@change="_set_comment_default('font_family', $event.target.value)">
+									<option v-for="f in ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana']" :key="f" :value="f">{{ f }}</option>
+								</select>
+							</div>
+							<div class="fu-slider-row">
+								<label class="fu-slider-label">{{ __("Size") }}</label>
+								<input type="range" class="fu-slider" min="1" max="20" step="0.5"
+									:value="comment_defaults.font_size_pct || 5"
+									@input="_set_comment_default('font_size_pct', parseFloat($event.target.value))" />
+								<span class="fu-slider-value">{{ (comment_defaults.font_size_pct || 5).toFixed(1) }}%</span>
+							</div>
+							<div class="fu-inline-field-row">
+								<label class="fu-inline-check">
+									<input type="checkbox"
+										:checked="comment_defaults.font_weight === 'Bold'"
+										@change="_set_comment_default('font_weight', $event.target.checked ? 'Bold' : 'Normal')" />
+									<span>B</span>
+								</label>
+								<label class="fu-inline-check">
+									<input type="checkbox"
+										:checked="comment_defaults.font_style === 'Italic'"
+										@change="_set_comment_default('font_style', $event.target.checked ? 'Italic' : 'Normal')" />
+									<span><em>I</em></span>
+								</label>
+								<label class="fu-inline-colour">
+									<span>{{ __("Color") }}</span>
+									<input type="color"
+										:value="comment_defaults.color || '#000000'"
+										@input="_set_comment_default('color', $event.target.value)" />
+								</label>
+							</div>
+							<div class="fu-tab-field">
+								<label class="fu-tab-field-label">{{ __("Align") }}</label>
+								<div class="fu-seg-row">
+									<button v-for="a in ['Left', 'Center', 'Right']" :key="a"
+										type="button" class="fu-seg-btn"
+										:class="{ active: (comment_defaults.align || 'Center') === a }"
+										@click="_set_comment_default('align', a)">{{ __(a) }}</button>
+								</div>
+							</div>
+						</template>
 					</div>
 
-					<!-- CANVAS pane (aspect + mode are editable here, baked later) -->
+					<!-- ── CANVAS pane ── -->
 					<div v-show="active_tab === 'canvas'" class="fu-tab-pane">
 						<div class="fu-tab-enable">
 							<span class="fu-tab-enable-label">{{ __("Enable Canvas normalization") }}</span>
@@ -365,35 +494,40 @@
 								</span>
 							</div>
 						</div>
-						<div v-if="resize_enabled_default && resize_settings" class="fu-tab-field">
-							<label class="fu-tab-field-label">{{ __("Aspect") }}</label>
-							<div class="fu-seg-row">
-								<button
-									v-for="opt in ['1:1', '4:3', '16:9', '3:2', '2:3', 'Free']"
-									:key="opt"
-									type="button"
-									class="fu-seg-btn"
-									:class="{ active: (resize_settings.resize_aspect || '1:1') === opt }"
-									@click="_set_canvas_aspect(opt)"
-								>{{ opt }}</button>
+						<template v-if="resize_enabled_default && resize_settings">
+							<div class="fu-tab-field">
+								<label class="fu-tab-field-label">{{ __("Aspect") }}</label>
+								<div class="fu-seg-row">
+									<button v-for="opt in ['1:1', '4:3', '16:9', '3:2', '2:3', 'Free']" :key="opt"
+										type="button" class="fu-seg-btn"
+										:class="{ active: (resize_settings.resize_aspect || '1:1') === opt }"
+										@click="_set_canvas_aspect(opt)">{{ opt }}</button>
+								</div>
 							</div>
-						</div>
-						<div v-if="resize_enabled_default && resize_settings" class="fu-tab-field">
-							<label class="fu-tab-field-label">{{ __("Mode") }}</label>
-							<div class="fu-seg-row">
-								<button
-									v-for="opt in ['Contain', 'Cover', 'Stretch']"
-									:key="opt"
-									type="button"
-									class="fu-seg-btn"
-									:class="{ active: (resize_settings.resize_mode || 'Contain') === opt }"
-									@click="_set_canvas_mode(opt)"
-								>{{ __(opt) }}</button>
+							<div class="fu-tab-field">
+								<label class="fu-tab-field-label">{{ __("Mode") }}</label>
+								<div class="fu-seg-row">
+									<button v-for="opt in ['Contain', 'Cover', 'Stretch']" :key="opt"
+										type="button" class="fu-seg-btn"
+										:class="{ active: (resize_settings.resize_mode || 'Contain') === opt }"
+										@click="_set_canvas_mode(opt)">{{ __(opt) }}</button>
+								</div>
 							</div>
-						</div>
-						<div v-else class="fu-tab-note">
-							{{ __("Resize, background color and file-size cap are configurable in the Crop step.") }}
-						</div>
+							<div class="fu-inline-field-row">
+								<label class="fu-inline-check">
+									<input type="checkbox"
+										:checked="resize_settings.resize_flatten_rgb !== false"
+										@change="_set_canvas_field('resize_flatten_rgb', $event.target.checked ? 1 : 0)" />
+									<span>{{ __("Solid Background") }}</span>
+								</label>
+								<label v-if="resize_settings.resize_flatten_rgb !== false" class="fu-inline-colour">
+									<span>{{ __("Color") }}</span>
+									<input type="color"
+										:value="resize_settings.resize_fill_color || '#FFFFFF'"
+										@input="_set_canvas_field('resize_fill_color', $event.target.value)" />
+								</label>
+							</div>
+						</template>
 					</div>
 				</div>
 			</template>
@@ -405,7 +539,7 @@
 			:fixed_aspect_ratio="restrictions.crop_image_aspect_ratio"
 			:show_remove_bg="show_remove_bg && !remove_bg_disabled_hint"
 			:remove_bg_checked="remove_bg_checked"
-			:remove_bg_padding_pct="remove_bg_padding_pct"
+			:remove_bg_padding_pct="step1_padding_pct"
 			:show_watermark="show_watermark"
 			:watermark_settings="watermark_settings"
 			:wm_default_enabled="wm_enabled"
@@ -561,6 +695,12 @@ export default {
 			// carry the user's default toggle intent into the cropper.
 			comments_enabled_default: !!(this.comment_defaults && this.comment_defaults.enabled),
 			resize_enabled_default: !!(this.resize_settings && this.resize_settings.resize_enabled),
+			// Auto-crop padding — initial value comes from Image Processing
+			// Settings (remove_bg_padding_pct prop). User can override on
+			// Step 1 before picking a file; the value is passed into the
+			// cropper via the :remove_bg_padding_pct prop below, so the
+			// cropper initializes to whatever Step 1 last had.
+			step1_padding_pct: this.remove_bg_padding_pct != null ? this.remove_bg_padding_pct : 2,
 			// Which right-panel tab is visible on Step 1. Reset in mounted()
 			// to the first-available feature so the pane doesn't open on a
 			// tab the consumer didn't opt into.
@@ -664,9 +804,21 @@ export default {
 		if (first) this.active_tab = first.key;
 	},
 	methods: {
-		// Canvas (Resize) aspect + mode editors for Step 1. We mutate the
-		// resize_settings object in place so the cropper picks up the
-		// latest values via its own prop watcher when the user clicks Crop.
+		// Step 1 params mutate their underlying settings objects in place
+		// so the cropper — which reads these same objects as props on
+		// mount — picks up the user's choices when they click a File
+		// Source button. All three settings objects (watermark_settings,
+		// resize_settings, comment_defaults) are passed by reference from
+		// index.js, so $set here updates the cropper's initial values.
+
+		_set_wm_field(field, value) {
+			if (!this.watermark_settings) return;
+			this.$set(this.watermark_settings, field, value);
+		},
+		_set_comment_default(field, value) {
+			if (!this.comment_defaults) return;
+			this.$set(this.comment_defaults, field, value);
+		},
 		_set_canvas_aspect(opt) {
 			if (!this.resize_settings) return;
 			this.$set(this.resize_settings, "resize_aspect", opt);
@@ -674,6 +826,10 @@ export default {
 		_set_canvas_mode(opt) {
 			if (!this.resize_settings) return;
 			this.$set(this.resize_settings, "resize_mode", opt);
+		},
+		_set_canvas_field(field, value) {
+			if (!this.resize_settings) return;
+			this.$set(this.resize_settings, field, value);
 		},
 		dragover() {
 			this.is_dragging = true;
@@ -1198,6 +1354,115 @@ export default {
 	border-color: var(--primary);
 }
 
+/* Slider row — label | slider | value, matches cropper's .wm-slider-row */
+.fu-slider-row {
+	display: grid;
+	grid-template-columns: 100px 1fr 52px;
+	align-items: center;
+	gap: 10px;
+}
+.fu-slider-label {
+	font-size: 14px;
+	font-weight: 500;
+	color: #475569;
+	margin: 0;
+}
+.fu-slider {
+	width: 100%;
+	height: 4px;
+	-webkit-appearance: none;
+	appearance: none;
+	background: #e2e8f0;
+	border-radius: 2px;
+	outline: none;
+	cursor: pointer;
+}
+.fu-slider::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: var(--primary);
+	cursor: grab;
+	border: 2px solid white;
+	box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+}
+.fu-slider::-moz-range-thumb {
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: var(--primary);
+	cursor: grab;
+	border: 2px solid white;
+}
+.fu-slider-value {
+	font-size: 13px;
+	color: #303133;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	font-weight: 500;
+}
+
+/* Select dropdown within a pane */
+.fu-select {
+	width: 100%;
+	padding: 7px 10px;
+	font-size: 14px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: #fff;
+	color: #303133;
+	cursor: pointer;
+}
+.fu-select:focus {
+	outline: none;
+	border-color: var(--primary);
+	box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+/* Row of inline fields: [B] [I] [Color ▣] — used in Comments + Canvas */
+.fu-inline-field-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 14px;
+	align-items: center;
+}
+.fu-inline-check {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #475569;
+	cursor: pointer;
+	margin: 0;
+}
+.fu-inline-check input[type="checkbox"] {
+	width: 18px;
+	height: 18px;
+	cursor: pointer;
+	margin: 0;
+}
+.fu-inline-colour {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #475569;
+	margin: 0;
+}
+.fu-inline-colour input[type="color"] {
+	width: 36px;
+	height: 28px;
+	padding: 2px;
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	cursor: pointer;
+	background: transparent;
+}
+
 /* Toggle pill — same look as the cropper's compact toggle */
 .fu-toggle-pill {
 	display: inline-flex;
@@ -1306,6 +1571,12 @@ export default {
 	.fu-tab-enable-label { font-size: 15px; }
 	.fu-tab-note { font-size: 13px; }
 	.fu-recap-list li { font-size: 14px; padding: 10px 12px; }
+	.fu-slider-row {
+		grid-template-columns: 84px 1fr 44px;
+		gap: 8px;
+	}
+	.fu-slider-label { font-size: 13px; }
+	.fu-slider-value { font-size: 12px; }
 }
 
 .file-upload-area {
