@@ -130,30 +130,28 @@
 			</div>
 
 			<!-- Preview strip: dedicated row under the cropper. Label on top
-			     acts as the visual divider, thumbnail centered underneath
-			     at 1:1 height with the cropper above. Clicking the thumb
-			     opens an Element UI image-viewer (zoom + rotate) when the
-			     bundle is loaded; falls back to a plain canvas on forms
-			     where element-ui isn't registered. -->
+			     acts as the visual divider; thumbnail centered underneath
+			     at 1:1 height with the cropper above. The thumb is an
+			     <el-image> with preview-src-list so click opens Element
+			     UI's image-viewer (zoom / rotate / pan). El-image lazy-
+			     renders an img from the data URL produced by the preview
+			     pipeline, which we refresh every time Canvas settings
+			     change via _refresh_preview_src(). -->
 			<div class="cropper-preview-bar" v-if="any_feature_on">
 				<div class="cropper-preview-header">
 					<span class="cropper-preview-title">{{ __("Preview") }}</span>
 					<span class="cropper-preview-hint">{{ __("final output after Crop") }}</span>
 				</div>
-				<div class="cropper-preview-thumb" @click="_open_preview_viewer">
-					<canvas ref="preview_canvas" class="resize-preview-canvas"></canvas>
-					<div class="cropper-preview-zoom" :title="__('Click to enlarge')">
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
-					</div>
+				<div class="cropper-preview-thumb">
+					<canvas ref="preview_canvas" class="resize-preview-canvas" :class="{ 'el-image-backed': !!_preview_data_url }"></canvas>
+					<el-image
+						v-if="_preview_data_url"
+						class="cropper-preview-elimage"
+						:src="_preview_data_url"
+						:preview-src-list="[_preview_data_url]"
+						fit="contain"
+					/>
 				</div>
-			</div>
-			<!-- Lazy-mounted el-image viewer — only inserted when user clicks
-			     the zoom. We use the viewer widget directly (not wrapping
-			     <el-image>) so the cropper panel doesn't require
-			     element-ui to be loaded globally. -->
-			<div v-if="_preview_viewer_open && _preview_data_url" class="cropper-preview-viewer-host" @click.self="_preview_viewer_open = false">
-				<img :src="_preview_data_url" class="cropper-preview-viewer-img" @click.stop />
-				<button class="cropper-preview-viewer-close" @click="_preview_viewer_open = false" :title="__('Close')">×</button>
 			</div>
 
 		</div>
@@ -721,11 +719,9 @@ export default {
 			// Live preview (new 2026-04) — rerenders on any resize param
 			// change so the user sees exactly what Crop will produce.
 			preview_dims: null,
-			// Lightbox state for the preview thumbnail: click opens a
-			// full-size overlay (data URL snapshot of the current preview
-			// canvas) so the user can inspect the final baked output
-			// without leaving the cropper.
-			_preview_viewer_open: false,
+			// Full-resolution data URL fed into <el-image> preview-src-list.
+			// Updated on every preview render so clicking the thumb
+			// always opens the current state of the pipeline.
 			_preview_data_url: null,
 			_preview_debounce: null,
 			// Comments (new 2026-04) — list of text overlays baked into
@@ -925,14 +921,6 @@ export default {
 				this._modal_body_el = body;
 			}
 		});
-
-		// ESC key closes the preview lightbox overlay when open.
-		this._on_doc_keydown = (e) => {
-			if (e.key === "Escape" && this._preview_viewer_open) {
-				this._preview_viewer_open = false;
-			}
-		};
-		document.addEventListener("keydown", this._on_doc_keydown);
 	},
 	beforeDestroy() {
 		document.removeEventListener("mousemove", this._on_mousemove);
@@ -942,7 +930,6 @@ export default {
 		document.removeEventListener("touchmove", this._on_touchmove);
 		document.removeEventListener("touchend", this._on_touchend);
 		window.removeEventListener("resize", this._on_window_resize);
-		if (this._on_doc_keydown) document.removeEventListener("keydown", this._on_doc_keydown);
 		if (this._resize_raf) cancelAnimationFrame(this._resize_raf);
 		if (this._modal_body_el) {
 			this._modal_body_el.classList.remove("image-cropper-modal-body");
@@ -1761,44 +1748,6 @@ export default {
 		},
 
 		// ── Live preview (new 2026-04) ──
-		// Click handler on the preview thumb — snapshot the current
-		// preview canvas to a data URL and open an overlay with the
-		// full-resolution final output. We take the snapshot from the
-		// post-composite canvas rather than the live cropper so the
-		// user sees exactly what will be uploaded.
-		_open_preview_viewer() {
-			const canvas = this.$refs.preview_canvas;
-			if (!canvas) return;
-			try {
-				// Render a higher-resolution preview for the viewer by
-				// re-running the composite pipeline at the cropper's
-				// natural size, then serializing to a data URL.
-				const src = this.cropper ? this.cropper.getCroppedCanvas() : null;
-				if (src) {
-					const work = document.createElement("canvas");
-					work.width = src.width;
-					work.height = src.height;
-					const wctx = work.getContext("2d");
-					wctx.drawImage(src, 0, 0);
-					if (this.wm_enabled && this.wm_loaded && this.wm_img) {
-						this._composite_watermark_on_canvas(work, wctx);
-					}
-					if (this.show_comments && this.comments_enabled) {
-						this._composite_comments_on_canvas(work, wctx);
-					}
-					const final_canvas = (this.show_resize && this.resize_enabled)
-						? this._apply_output_shape(work)
-						: work;
-					this._preview_data_url = final_canvas.toDataURL("image/png");
-				} else {
-					this._preview_data_url = canvas.toDataURL("image/png");
-				}
-				this._preview_viewer_open = true;
-			} catch (e) {
-				console.error("preview viewer failed", e);
-			}
-		},
-
 		_schedule_preview_update() {
 			if (this._preview_debounce) clearTimeout(this._preview_debounce);
 			this._preview_debounce = setTimeout(() => {
@@ -1872,6 +1821,17 @@ export default {
 			pctx.drawImage(final_canvas, 0, 0, disp_w, disp_h);
 
 			this.preview_dims = { w: final_canvas.width, h: final_canvas.height };
+
+			// Refresh the <el-image> data URL from the same final_canvas
+			// so the click-to-enlarge viewer always shows current state.
+			try {
+				const fmt = (this.show_resize && this.resize_enabled && !this.resize_flatten_rgb)
+					? "image/png" : "image/jpeg";
+				this._preview_data_url = final_canvas.toDataURL(fmt, 0.88);
+			} catch (e) {
+				// toDataURL can throw on huge canvases; fall back to null
+				this._preview_data_url = null;
+			}
 		},
 
 		// Extract the watermark composite from crop_image() so _render_preview
@@ -2456,17 +2416,8 @@ img {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	cursor: zoom-in;
-	transition: opacity 0.15s ease;
-}
-.cropper-preview-thumb:hover { opacity: 0.92; }
-.cropper-preview-thumb:hover .cropper-preview-zoom { opacity: 1; }
-.cropper-preview-thumb canvas {
-	max-width: 100%;
-	max-height: 100%;
-	width: auto;
-	height: auto;
 	border: 1px solid var(--border-color);
+	border-radius: 6px;
 	background: #ffffff;
 	background-image:
 		linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
@@ -2475,73 +2426,31 @@ img {
 		linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
 	background-size: 12px 12px;
 	background-position: 0 0, 0 6px, 6px -6px, -6px 0;
-	border-radius: 6px;
-	display: block;
+	overflow: hidden;
 }
-.cropper-preview-zoom {
-	position: absolute;
-	top: 8px;
-	right: 8px;
-	width: 28px;
-	height: 28px;
-	border-radius: 50%;
-	background: rgba(15, 23, 42, 0.72);
-	color: #fff;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	opacity: 0;
-	transition: opacity 0.15s ease;
-	pointer-events: none;   /* visual hint only, parent owns the click */
-}
-
-/* Lightbox overlay shown when user clicks the preview thumb. */
-.cropper-preview-viewer-host {
-	position: fixed;
-	inset: 0;
-	background: rgba(15, 23, 42, 0.82);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	z-index: 2050;  /* above Bootstrap modal (1055) */
-	padding: 40px;
-	cursor: zoom-out;
-}
-.cropper-preview-viewer-img {
+/* Fallback canvas shown until the <el-image> mounts its img (first
+   _render_preview populates _preview_data_url → el-image takes over). */
+.cropper-preview-thumb canvas {
 	max-width: 100%;
 	max-height: 100%;
+	width: auto;
+	height: auto;
+	display: block;
+}
+/* Hide the canvas once el-image has an src — el-image handles rendering
+   AND the zoom-viewer lifecycle, so showing both would double-draw. */
+.cropper-preview-thumb canvas.el-image-backed { display: none; }
+/* el-image fills the thumb container and provides its own preview
+   behaviour — preview-src-list spins up el-image-viewer on click. */
+.cropper-preview-elimage {
+	width: 100%;
+	height: 100%;
+	cursor: zoom-in;
+}
+.cropper-preview-elimage >>> .el-image__inner {
 	object-fit: contain;
-	border-radius: 6px;
-	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
-	background: #fff;
-	background-image:
-		linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
-		linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
-		linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
-		linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
-	background-size: 16px 16px;
-	cursor: default;
-}
-.cropper-preview-viewer-close {
-	position: absolute;
-	top: 20px;
-	right: 24px;
-	width: 40px;
-	height: 40px;
-	border-radius: 50%;
-	border: none;
-	background: rgba(255, 255, 255, 0.15);
-	color: #fff;
-	font-size: 28px;
-	line-height: 1;
-	cursor: pointer;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	transition: background 0.15s ease;
-}
-.cropper-preview-viewer-close:hover {
-	background: rgba(255, 255, 255, 0.28);
+	width: 100%;
+	height: 100%;
 }
 .cropper-preview-chips {
 	margin-top: 6px;
@@ -3641,5 +3550,17 @@ img {
    modal-footer because they share the same .modal-content parent. */
 .modal-body.image-cropper-modal-body + .modal-footer {
 	display: none !important;
+}
+
+/* Element UI's <el-image> mounts its image-viewer lightbox at
+   document.body — it's not inside the Vue subtree so scoped styles
+   can't reach it. Bootstrap's modal uses z-index: 1055, so without
+   this bump the viewer opens UNDERNEATH the upload dialog and the
+   user can't interact with it. */
+.el-image-viewer__wrapper {
+	z-index: 2050 !important;
+}
+.el-image-viewer__mask {
+	z-index: 2049 !important;
 }
 </style>
