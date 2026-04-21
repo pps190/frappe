@@ -1058,9 +1058,9 @@ export default {
 .file-uploader { display: block; }
 .file-uploader.fu-with-panel {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 320px;
-	gap: 16px;
-	align-items: start;
+	grid-template-columns: minmax(0, 1fr) 420px;
+	gap: 20px;
+	align-items: stretch;
 }
 .file-uploader .fu-left-col { min-width: 0; }
 .file-uploader .fu-right-col {
@@ -1069,35 +1069,35 @@ export default {
 	border: 1px solid var(--border-color);
 	border-radius: 10px;
 	background: #fff;
-	padding: 12px;
+	padding: 18px;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: 16px;
+	min-height: 360px;
 }
 
 /* Tab header strip ─ matches the cropper's .cropper-feature-tabs
    visual style so Step 1 and Step 2 look like the same control. */
 .fu-feature-tabs {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
-	gap: 4px;
+	grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+	gap: 6px;
 	background: #f1f5f9;
-	border-radius: 8px;
-	padding: 4px;
+	border-radius: 10px;
+	padding: 6px;
 }
 .fu-feature-tab {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 3px;
-	padding: 8px 6px;
+	gap: 5px;
+	padding: 12px 8px;
 	background: transparent;
 	border: none;
-	border-radius: 6px;
+	border-radius: 8px;
 	cursor: pointer;
 	color: #64748b;
-	font-size: 12px;
 	transition: background 0.15s ease, color 0.15s ease;
 }
 .fu-feature-tab:hover { background: rgba(255, 255, 255, 0.55); }
@@ -1108,14 +1108,14 @@ export default {
 }
 .fu-feature-tab-label {
 	font-weight: 600;
-	font-size: 11px;
+	font-size: 15px;
 	line-height: 1.2;
 }
 .fu-feature-tab-state {
 	display: inline-flex;
 	align-items: center;
-	gap: 3px;
-	font-size: 10px;
+	gap: 4px;
+	font-size: 13px;
 	font-weight: 500;
 	text-transform: uppercase;
 	letter-spacing: 0.02em;
@@ -1123,8 +1123,8 @@ export default {
 .fu-feature-tab-state.on { color: #10b981; }
 .fu-feature-tab-state.off { color: #94a3b8; }
 .fu-feature-tab-dot {
-	width: 6px;
-	height: 6px;
+	width: 8px;
+	height: 8px;
 	border-radius: 50%;
 	background: currentColor;
 }
@@ -1133,29 +1133,29 @@ export default {
 .fu-tab-pane {
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
+	gap: 14px;
 }
 .fu-tab-enable {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 8px 10px;
+	padding: 14px 16px;
 	border: 1px solid var(--border-color);
-	border-radius: 6px;
+	border-radius: 8px;
 	background: #fafbfc;
 }
 .fu-tab-enable-label {
-	font-size: 13px;
+	font-size: 16px;
 	font-weight: 600;
 	color: #303133;
 }
 .fu-tab-note {
-	font-size: 12px;
+	font-size: 14px;
 	color: var(--text-muted);
-	line-height: 1.5;
-	padding: 8px 10px;
+	line-height: 1.55;
+	padding: 12px 14px;
 	background: #f8fafc;
-	border-radius: 6px;
+	border-radius: 8px;
 }
 .fu-tab-note a {
 	color: var(--primary);
@@ -1165,10 +1165,10 @@ export default {
 .fu-tab-field {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 6px;
 }
 .fu-tab-field-label {
-	font-size: 11px;
+	font-size: 14px;
 	font-weight: 600;
 	color: #475569;
 	text-transform: uppercase;
@@ -1178,16 +1178,16 @@ export default {
 .fu-seg-row {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px;
+	gap: 6px;
 }
 .fu-seg-btn {
-	padding: 4px 10px;
-	font-size: 12px;
+	padding: 7px 14px;
+	font-size: 14px;
 	font-weight: 500;
 	color: #475569;
 	background: #fff;
 	border: 1px solid var(--border-color);
-	border-radius: 4px;
+	border-radius: 6px;
 	cursor: pointer;
 	transition: all 0.15s ease;
 }
@@ -1210,9 +1210,9 @@ export default {
 }
 .fu-toggle-track {
 	display: inline-block;
-	width: 30px;
-	height: 16px;
-	border-radius: 8px;
+	width: 40px;
+	height: 22px;
+	border-radius: 11px;
 	background: #cbd5e1;
 	position: relative;
 	transition: background 0.2s ease;
@@ -1220,31 +1220,32 @@ export default {
 .fu-toggle-track.on { background: var(--primary); }
 .fu-toggle-thumb {
 	position: absolute;
-	top: 2px;
-	left: 2px;
-	width: 12px;
-	height: 12px;
+	top: 3px;
+	left: 3px;
+	width: 16px;
+	height: 16px;
 	border-radius: 50%;
 	background: #fff;
 	transition: transform 0.2s ease;
 }
-.fu-toggle-track.on .fu-toggle-thumb { transform: translateX(14px); }
+.fu-toggle-track.on .fu-toggle-thumb { transform: translateX(18px); }
 
 /* ── Recap card (Step 3) ────────────────────────────────────────── */
 .fu-recap-card {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 6px;
 }
 .fu-recap-title {
-	font-size: 13px;
+	font-size: 16px;
 	font-weight: 600;
 	color: #0f172a;
 }
 .fu-recap-hint {
-	font-size: 11px;
+	font-size: 13px;
 	color: var(--text-muted);
-	margin-bottom: 8px;
+	margin-bottom: 10px;
+	line-height: 1.5;
 }
 .fu-recap-list {
 	list-style: none;
@@ -1252,49 +1253,59 @@ export default {
 	padding: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 8px;
 }
 .fu-recap-list li {
 	display: grid;
-	grid-template-columns: 10px 1fr auto;
+	grid-template-columns: 12px 1fr auto;
 	align-items: center;
-	gap: 8px;
-	padding: 8px 10px;
+	gap: 12px;
+	padding: 12px 14px;
 	border: 1px solid var(--border-color);
-	border-radius: 6px;
+	border-radius: 8px;
 	background: #fafbfc;
-	font-size: 12px;
+	font-size: 15px;
 }
 .fu-recap-list li.off {
 	background: #f8fafc;
 	color: #94a3b8;
 }
 .fu-recap-dot {
-	width: 8px;
-	height: 8px;
+	width: 10px;
+	height: 10px;
 	border-radius: 50%;
 }
 .fu-recap-dot.on  { background: #10b981; }
 .fu-recap-dot.off { background: #cbd5e1; }
 .fu-recap-label { font-weight: 500; }
 .fu-recap-value {
-	font-size: 11px;
+	font-size: 13px;
 	color: #64748b;
 	text-transform: uppercase;
 	letter-spacing: 0.03em;
+	font-weight: 500;
 }
 
 /* ── Mobile: stack right column below left ─────────────────────── */
-@media (max-width: 768px) {
+@media (max-width: 900px) {
 	.file-uploader.fu-with-panel {
 		grid-template-columns: 1fr;
+		gap: 16px;
 	}
 	.file-uploader .fu-right-col {
 		position: static;
+		min-height: 0;
+		padding: 14px;
 	}
 	.fu-feature-tabs {
 		grid-template-columns: repeat(4, 1fr);
 	}
+	.fu-feature-tab { padding: 10px 4px; }
+	.fu-feature-tab-label { font-size: 14px; }
+	.fu-feature-tab-state { font-size: 12px; }
+	.fu-tab-enable-label { font-size: 15px; }
+	.fu-tab-note { font-size: 13px; }
+	.fu-recap-list li { font-size: 14px; padding: 10px 12px; }
 }
 
 .file-upload-area {

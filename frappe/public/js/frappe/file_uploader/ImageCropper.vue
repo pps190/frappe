@@ -2232,9 +2232,9 @@ export default {
    Mobile: stacked (media query below flips to single-column). */
 .cropper-grid {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+	grid-template-columns: minmax(0, 1fr) 420px;
 	grid-template-rows: 1fr auto;
-	gap: 16px;
+	gap: 20px;
 	align-items: stretch;
 	min-height: 0;
 }
@@ -2385,6 +2385,7 @@ img {
 .cropper-feature-tab-label {
 	font-weight: 600;
 	color: #303133;
+	font-size: 15px;
 }
 .cropper-feature-tab.active .cropper-feature-tab-label {
 	color: #3b82f6;
@@ -2392,14 +2393,14 @@ img {
 .cropper-feature-tab-state {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
-	font-size: 10px;
-	font-weight: 700;
+	gap: 5px;
+	font-size: 13px;
+	font-weight: 600;
 	text-transform: uppercase;
 }
 .cropper-feature-tab-dot {
-	width: 6px;
-	height: 6px;
+	width: 8px;
+	height: 8px;
 	border-radius: 50%;
 	background: #cbd5e1;
 }
@@ -2438,7 +2439,7 @@ img {
 	background: #fafbfc;
 }
 .cropper-tab-enable-label {
-	font-size: 13px;
+	font-size: 16px;
 	font-weight: 600;
 	color: #303133;
 	display: inline-flex;
@@ -2446,11 +2447,11 @@ img {
 	gap: 8px;
 }
 .cropper-tab-enable-hint {
-	font-size: 11px;
+	font-size: 13px;
 	font-weight: 500;
 	color: var(--primary);
 	background: var(--control-bg, #e6f1fc);
-	padding: 2px 8px;
+	padding: 3px 10px;
 	border-radius: 10px;
 	animation: cropper-hint-pulse 1.4s ease-in-out infinite;
 }
