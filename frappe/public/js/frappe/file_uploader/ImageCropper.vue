@@ -230,14 +230,17 @@
 				<!-- REMOVE BG TAB -->
 				<div v-show="active_tab === 'remove_bg'" class="cropper-tab-pane">
 					<div class="cropper-tab-enable">
-						<span class="cropper-tab-enable-label">{{ __("Enable Remove Background") }}</span>
+						<span class="cropper-tab-enable-label">
+							{{ __("Enable Remove Background") }}
+							<span v-if="bg_processing" class="cropper-tab-enable-hint">{{ __("Processing…") }}</span>
+						</span>
 						<div
 							class="toggle-pill toggle-pill-compact"
-							:class="{ active: bg_removed, processing: bg_processing }"
+							:class="{ active: bg_removed || bg_processing, processing: bg_processing }"
 							@click="toggle_remove_bg"
 						>
 							<span class="toggle-pill-switch">
-								<span class="toggle-pill-track" :class="{ on: bg_removed }">
+								<span class="toggle-pill-track" :class="{ on: bg_removed || bg_processing }">
 									<span class="toggle-pill-thumb"></span>
 								</span>
 							</span>
@@ -644,12 +647,12 @@ export default {
 		"show_remove_bg", "remove_bg_checked", "remove_bg_padding_pct",
 		"show_watermark", "watermark_settings", "wm_default_enabled",
 		// Resize (new 2026-04) — from Image Processing Settings via item.js
-		"show_resize", "resize_settings",
+		"show_resize", "resize_settings", "resize_default_enabled",
 		// Comments (new 2026-04) — simple list of text overlays baked into
 		// the final output. The single-item flow uses a lightweight
 		// textarea-based editor (no drag). Batch flow uses the full
 		// CommentBoxEditor with draggable handles.
-		"show_comments", "comment_defaults", "comment_presets",
+		"show_comments", "comment_defaults", "comment_presets", "comments_default_enabled",
 	],
 	data() {
 		return {
@@ -741,7 +744,14 @@ export default {
 		},
 		// Any change to resize params → rerender the preview. Debounced
 		// so slider drags don't hammer the off-screen canvas composite.
-		resize_enabled() { this._schedule_preview_update(); },
+		resize_enabled(v) {
+			this._schedule_preview_update();
+			this.$emit("resize_enabled_changed", !!v);
+		},
+		comments_enabled(v) {
+			this._schedule_preview_update();
+			this.$emit("comments_enabled_changed", !!v);
+		},
 		resize_aspect() { this._schedule_preview_update(); },
 		resize_mode() { this._schedule_preview_update(); },
 		resize_fill_color() { this._schedule_preview_update(); },
@@ -812,9 +822,13 @@ export default {
 			this.load_watermark_image(this.watermark_settings.watermark_image);
 		}
 
-		// Resize: load settings (new 2026-04)
+		// Resize: load settings (new 2026-04). The pre-cropper footer
+		// toggle (resize_default_enabled) wins over Settings so a user
+		// who flipped Canvas off on the file-picker page stays off.
 		if (this.show_resize && this.resize_settings) {
-			this.resize_enabled = !!this.resize_settings.resize_enabled;
+			this.resize_enabled = this.resize_default_enabled != null
+				? !!this.resize_default_enabled
+				: !!this.resize_settings.resize_enabled;
 			this.resize_aspect = this.resize_settings.resize_aspect || "1:1";
 			this.resize_mode = this.resize_settings.resize_mode || "Contain";
 			this.resize_fill_color = this.resize_settings.resize_fill_color || "#FFFFFF";
@@ -822,10 +836,13 @@ export default {
 			// (max_file_size_kb is global Settings only; not read here)
 		}
 
-		// Comments: off by default on new uploads. The user has to opt in
-		// each time (unlike Resize which follows the Settings default)
-		// because comments carry meaning — users shouldn't accidentally
-		// bake a previous session's text onto a new photo.
+		// Comments: off by default on new uploads unless the footer
+		// toggle is ON. Comments carry meaning, so we don't silently
+		// bake a previous session's text onto a new photo — the user
+		// has to opt in either on the file-picker page or via the tab.
+		if (this.show_comments) {
+			this.comments_enabled = !!this.comments_default_enabled;
+		}
 		// comment_boxes starts empty; user adds them with + Add Comment.
 
 		// Global listeners for watermark drag
@@ -2417,6 +2434,29 @@ img {
 	font-size: 13px;
 	font-weight: 600;
 	color: #303133;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+.cropper-tab-enable-hint {
+	font-size: 11px;
+	font-weight: 500;
+	color: var(--primary);
+	background: var(--control-bg, #e6f1fc);
+	padding: 2px 8px;
+	border-radius: 10px;
+	animation: cropper-hint-pulse 1.4s ease-in-out infinite;
+}
+@keyframes cropper-hint-pulse {
+	0%, 100% { opacity: 0.65; }
+	50% { opacity: 1; }
+}
+.toggle-pill-compact.processing {
+	cursor: not-allowed;
+	pointer-events: none;
+}
+.toggle-pill-compact.processing .toggle-pill-track {
+	animation: cropper-hint-pulse 1.4s ease-in-out infinite;
 }
 .toggle-pill-compact {
 	padding: 0;

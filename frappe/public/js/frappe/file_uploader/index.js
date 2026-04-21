@@ -140,7 +140,10 @@ export default class FileUploader {
 			this.uploader.add_files(files);
 		}
 
-		// Add footer toggles after uploader is ready
+		// Add footer toggles after uploader is ready. Order matches the
+		// tabs inside the cropper (Remove BG → Watermark → Comments →
+		// Canvas) so the user sees the same 4 features in the same order
+		// on both the file-picker page and the cropper page.
 		if (this.dialog && this.show_remove_bg) {
 			this.add_footer_toggle(
 				"remove_bg",
@@ -160,6 +163,26 @@ export default class FileUploader {
 				has_config && this.watermark_settings.enabled ? true : false,
 				has_config ? null : __("Click to configure watermark"),
 				has_config ? null : "/app/watermark-settings",
+			);
+		}
+		if (this.dialog && this.show_comments) {
+			this.add_footer_toggle(
+				"comments",
+				__("Comments"),
+				"comments_enabled_default",
+				!!(this.comment_defaults && this.comment_defaults.enabled),
+				null,
+				null,
+			);
+		}
+		if (this.dialog && this.show_resize) {
+			this.add_footer_toggle(
+				"canvas",
+				__("Canvas"),
+				"resize_enabled_default",
+				!!(this.resize_settings && this.resize_settings.resize_enabled),
+				null,
+				null,
 			);
 		}
 	}

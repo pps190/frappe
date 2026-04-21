@@ -226,13 +226,17 @@
 			:wm_default_enabled="wm_enabled"
 			:show_resize="show_resize"
 			:resize_settings="resize_settings"
+			:resize_default_enabled="resize_enabled_default"
 			:show_comments="show_comments"
 			:comment_defaults="comment_defaults"
 			:comment_presets="comment_presets"
+			:comments_default_enabled="comments_enabled_default"
 			@toggle_image_cropper="toggle_image_cropper(-1)"
 			@upload_after_crop="trigger_upload = true"
 			@remove_bg_changed="remove_bg_checked = $event"
 			@wm_enabled_changed="wm_enabled = $event"
+			@comments_enabled_changed="comments_enabled_default = $event"
+			@resize_enabled_changed="resize_enabled_default = $event"
 		/>
 		<FileBrowser
 			ref="file_browser"
@@ -366,6 +370,12 @@ export default {
 			wrapper_ready: false,
 			remove_bg_checked: this.remove_bg_default && !this.remove_bg_disabled_hint,
 			wm_enabled: this.watermark_settings && this.watermark_settings.enabled ? true : false,
+			// Pre-cropper toggles for Comments + Canvas so the file-picker
+			// page exposes the same 4 features the cropper tab-panel does.
+			// Actual application happens inside ImageCropper; these just
+			// carry the user's default toggle intent into the cropper.
+			comments_enabled_default: !!(this.comment_defaults && this.comment_defaults.enabled),
+			resize_enabled_default: !!(this.resize_settings && this.resize_settings.resize_enabled),
 		};
 	},
 	created() {
@@ -789,21 +799,129 @@ export default {
 </script>
 <style>
 .file-upload-area {
-	min-height: 16rem;
+	min-height: 20rem;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	border: 1px dashed var(--dark-border-color);
-	border-radius: var(--border-radius);
+	padding: 24px;
+	border: 2px dashed var(--dark-border-color);
+	border-radius: 10px;
 	cursor: pointer;
 	background-color: var(--bg-color);
+	transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.file-upload-area:hover {
+	border-color: var(--primary);
+	background-color: var(--control-bg, #f4f8fc);
+}
+.file-upload-area .text-center {
+	color: var(--text-muted);
+	font-size: 14px;
 }
 
+/* File picker button tiles — rounded pill-style hover, responsive grid */
+.file-upload-area .mt-2.text-center {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 12px;
+	margin-top: 18px !important;
+}
 .btn-file-upload {
 	background-color: transparent;
-	border: none;
+	border: 1px solid transparent;
+	border-radius: 12px;
 	box-shadow: none;
+	padding: 14px 18px;
 	font-size: var(--text-xs);
+	min-width: 96px;
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.btn-file-upload:hover {
+	transform: translateY(-1px);
+	background: #fff;
+	border-color: var(--border-color);
+	box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+}
+.btn-file-upload:active {
+	transform: translateY(0);
+}
+.btn-file-upload svg {
+	display: block;
+}
+.btn-file-upload .mt-1 {
+	font-size: 12px;
+	font-weight: 500;
+	color: var(--text-color);
+	margin-top: 2px !important;
+}
+
+/* Post-crop file preview list — rounded rows, breathable spacing,
+   responsive for narrow viewports. Overrides base FilePreview.vue
+   styles so the list lines up with the modal's new sizing. */
+.file-uploader .file-preview-container {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 14px;
+}
+.file-uploader .file-preview-container .file-preview {
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	background: #fff;
+	padding: 12px 14px;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.file-uploader .file-preview-container .file-preview + .file-preview {
+	border-top-color: var(--border-color);
+}
+.file-uploader .file-preview-container .file-preview:hover {
+	background-color: var(--bg-color);
+	border-color: var(--dark-border-color);
+	box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+}
+.file-uploader .file-preview .file-icon {
+	width: 3rem;
+	height: 3rem;
+	border-radius: 8px;
+}
+.file-uploader .file-preview .file-name {
+	font-size: 13px;
+	font-weight: 600;
+}
+.file-uploader .file-preview .file-size {
+	font-size: 12px;
+}
+.file-uploader .file-preview .config-area {
+	margin-top: 4px;
+}
+
+/* Below-list action row (Upload button + help text) — align vertically
+   on mobile so the button never ends up squeezed under a long hint. */
+.file-uploader .flex.align-center {
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+	.file-upload-area {
+		min-height: 14rem;
+		padding: 16px;
+	}
+	.file-upload-area .mt-2.text-center {
+		gap: 8px;
+	}
+	.btn-file-upload {
+		min-width: 80px;
+		padding: 10px 12px;
+	}
+	.file-uploader .file-preview-container .file-preview {
+		padding: 10px;
+	}
 }
 
 .footer-toggle {
@@ -1023,6 +1141,20 @@ export default {
 	flex: 1 1 auto;
 	overflow-y: auto;
 }
+/* Footer region — standard-actions holds the primary Upload button,
+   custom-actions holds the feature toggles (Watermark / Remove BG
+   pills). Space them properly so they don't collide, and wrap on
+   narrow viewports. */
+.file-uploader-dialog .modal-footer {
+	gap: 10px;
+	flex-wrap: wrap;
+}
+.file-uploader-dialog .modal-footer .custom-btns {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
 @media (max-width: 768px) {
 	.file-uploader-dialog .modal-dialog {
 		max-width: 100vw;
@@ -1033,6 +1165,22 @@ export default {
 		min-height: 100vh;
 		max-height: 100vh;
 		border-radius: 0;
+	}
+	.file-uploader-dialog .modal-footer {
+		flex-direction: column;
+		align-items: stretch;
+	}
+	.file-uploader-dialog .modal-footer .custom-btns {
+		justify-content: center;
+		order: -1; /* Toggles above primary action on mobile */
+	}
+	.file-uploader-dialog .modal-footer .standard-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 6px;
+	}
+	.footer-toggle {
+		margin-right: 0;
 	}
 }
 </style>
