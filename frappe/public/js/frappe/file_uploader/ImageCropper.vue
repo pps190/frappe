@@ -1237,6 +1237,20 @@ export default {
 				}
 				this.file.file_obj = new File([blob], name, { type: blob.type });
 				this.file.name = name;
+				// Emit the final settings snapshot so FileUploader's Step 3
+				// recap card shows the exact values the user baked into the
+				// file (not the Step 1 defaults, which may have been
+				// overridden inside the cropper).
+				this.$emit("crop_committed", {
+					remove_bg: !!this.bg_removed,
+					watermark_enabled: !!this.wm_enabled,
+					watermark_mode: this.wm_mode,
+					comments_enabled: !!this.comments_enabled,
+					comment_count: (this.comment_boxes || []).length,
+					resize_enabled: !!this.resize_enabled,
+					resize_aspect: this.resize_aspect,
+					resize_mode: this.resize_mode,
+				});
 				this.$emit("toggle_image_cropper");
 			}, file_type, file_type === "image/jpeg" ? 0.92 : undefined);
 		},
