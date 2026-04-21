@@ -129,30 +129,25 @@
 				</div>
 			</div>
 
-			<!-- Preview strip: dedicated row under the cropper. Label on top
-			     acts as the visual divider; thumbnail centered underneath
-			     at 1:1 height with the cropper above. The thumb is an
-			     <el-image> with preview-src-list so click opens Element
-			     UI's image-viewer (zoom / rotate / pan). El-image lazy-
-			     renders an img from the data URL produced by the preview
-			     pipeline, which we refresh every time Canvas settings
-			     change via _refresh_preview_src(). -->
-			<div class="cropper-preview-bar" v-if="any_feature_on">
-				<div class="cropper-preview-header">
-					<span class="cropper-preview-title">{{ __("Preview") }}</span>
-					<span class="cropper-preview-hint">{{ __("final output after Crop") }}</span>
-				</div>
-				<div class="cropper-preview-thumb">
-					<canvas ref="preview_canvas" class="resize-preview-canvas" :class="{ 'el-image-backed': !!_preview_data_url }"></canvas>
-					<el-image
-						v-if="_preview_data_url"
-						class="cropper-preview-elimage"
-						:src="_preview_data_url"
-						:preview-src-list="[_preview_data_url]"
-						fit="contain"
-					/>
-				</div>
-			</div>
+			<!-- Preview — compact 400×400 thumb that matches the Item
+			     Image Batch row-thumbnail pattern. No outer card /
+			     header wrapper: the <el-image> is the whole thing,
+			     sitting directly in the left-col flex flow. Click
+			     opens Element UI's image-viewer lightbox. -->
+			<template v-if="any_feature_on">
+				<canvas
+					ref="preview_canvas"
+					class="cropper-preview-canvas"
+					:class="{ 'el-image-backed': !!_preview_data_url }"
+				></canvas>
+				<el-image
+					v-if="_preview_data_url"
+					class="cropper-preview-elimage"
+					:src="_preview_data_url"
+					:preview-src-list="[_preview_data_url]"
+					fit="contain"
+				/>
+			</template>
 
 		</div>
 
@@ -2388,79 +2383,33 @@ img {
 	max-height: min(600px, calc(100vh - 320px));
 }
 
-/* ── Preview bar below cropper ────────────────────────────────────
-   Dedicated section below the cropper acting as a visual divider —
-   header on top, thumbnail centered. Sized equally with
-   .cropper-image-wrapper above (flex:1 each) so "edit area" and
-   "preview" mirror each other. */
-.cropper-preview-bar {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	padding: 12px 14px;
-	border: 1px solid var(--border-color);
-	border-radius: 8px;
-	background: var(--fg-color, white);
-	align-items: stretch;
-	flex: 1 1 0;
-	min-height: 0;
-	overflow: hidden;
-}
-.cropper-preview-header {
-	display: flex;
-	align-items: baseline;
-	gap: 8px;
-	padding-bottom: 8px;
-	border-bottom: 1px solid var(--border-color);
+/* ── Preview thumb below cropper ──────────────────────────────────
+   Bare 400×400 el-image, no outer card / header wrapper. Sits
+   directly in the left-col flex flow, left-aligned. Matches the
+   Item Image Batch row-thumbnail visual language (deep background,
+   rounded corners, zoom-on-hover). Click → Element UI image-viewer. */
+.cropper-preview-canvas,
+.cropper-preview-elimage {
+	align-self: flex-start;
+	width: 400px;
+	height: 400px;
 	flex-shrink: 0;
-}
-.cropper-preview-title {
-	font-weight: 600;
-	font-size: 15px;
-	color: #303133;
-}
-.cropper-preview-hint {
-	font-weight: 400;
-	font-size: 13px;
-	color: #94a3b8;
-}
-.cropper-preview-thumb {
-	position: relative;
-	flex: 1 1 auto;
-	min-height: 0;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	border: 1px solid var(--border-color);
-	border-radius: 6px;
-	background: #ffffff;
-	background-image:
-		linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
-		linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
-		linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
-		linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
-	background-size: 12px 12px;
-	background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+	border-radius: 8px;
+	background: #2c2c2c;
 	overflow: hidden;
+	display: block;
+	cursor: zoom-in;
+	transition: box-shadow 0.15s ease, transform 0.12s ease;
 }
-/* Fallback canvas shown until the <el-image> mounts its img (first
-   _render_preview populates _preview_data_url → el-image takes over). */
-.cropper-preview-thumb canvas {
+.cropper-preview-canvas {
+	/* Fallback before el-image mounts with the first data URL. */
 	max-width: 100%;
 	max-height: 100%;
-	width: auto;
-	height: auto;
-	display: block;
 }
-/* Hide the canvas once el-image has an src — el-image handles rendering
-   AND the zoom-viewer lifecycle, so showing both would double-draw. */
-.cropper-preview-thumb canvas.el-image-backed { display: none; }
-/* el-image fills the thumb container and provides its own preview
-   behaviour — preview-src-list spins up el-image-viewer on click. */
-.cropper-preview-elimage {
-	width: 100%;
-	height: 100%;
-	cursor: zoom-in;
+.cropper-preview-canvas.el-image-backed { display: none; }
+.cropper-preview-elimage:hover {
+	box-shadow: 0 0 0 2px var(--primary, #2563eb), 0 6px 14px rgba(37, 99, 235, 0.2);
+	transform: scale(1.01);
 }
 .cropper-preview-elimage >>> .el-image__inner {
 	object-fit: contain;
@@ -2666,27 +2615,25 @@ img {
 }
 
 /* ── Mobile: stack left + right columns ──
-   Grid collapses to one column and rows auto-stretch. The cropper
-   wrapper and preview bar keep the 1:1 flex ratio inside left-col,
-   and the right panel stacks below at its natural height. The
-   whole page is vertically scrollable so on phones the user sees
-   cropper → preview → params → Crop button by scrolling. */
+   Grid collapses to one column. Cropper stays dominant (~60vh),
+   preview becomes a compact row with a 160×160 thumb. Right panel
+   scrolls naturally with the page so user sees
+   cropper → preview → params → Crop. */
 @media (max-width: 900px) {
 	.cropper-grid {
 		grid-template-columns: 1fr;
 		grid-template-rows: auto auto auto;
 		height: auto;
 	}
-	.cropper-left-col {
-		/* On mobile, cropper + preview each take 40vh so both are visible
-		   at once without forcing a huge viewport. Together with the
-		   right-col and action bar they fit a normal phone viewport. */
-		min-height: 80vh;
+	.cropper-left-col { min-height: 0; }
+	.cropper-image-wrapper {
+		flex: 0 0 auto;
+		min-height: 60vh;
 	}
-	.cropper-image-wrapper,
-	.cropper-preview-bar {
-		flex: 1 1 40vh;
-		min-height: 40vh;
+	.cropper-preview-canvas,
+	.cropper-preview-elimage {
+		width: 260px;
+		height: 260px;
 	}
 	.cropper-right-col {
 		max-height: none;
@@ -2701,16 +2648,14 @@ img {
 	.wm-slider-row .wm-slider-label { width: 82px; font-size: 13px; }
 	.wm-slider-row .wm-slider-value { width: 44px; font-size: 12px; }
 	.segmented-tab { padding: 7px 12px; font-size: 13px; }
-	.cropper-preview-thumb canvas { max-width: 100%; max-height: 100%; }
 }
 @media (max-width: 480px) {
-	/* Very small phones — shrink each row further so all 3 sections
-	   still fit in a single swipe. */
-	.cropper-left-col { min-height: 72vh; }
-	.cropper-image-wrapper,
-	.cropper-preview-bar {
-		flex: 1 1 36vh;
-		min-height: 36vh;
+	/* Very small phones — smaller cropper + thumb to fit a single swipe. */
+	.cropper-image-wrapper { min-height: 50vh; }
+	.cropper-preview-canvas,
+	.cropper-preview-elimage {
+		width: 180px;
+		height: 180px;
 	}
 }
 
@@ -2838,9 +2783,17 @@ img {
 
 .cropper-image-wrapper {
 	position: relative;
-	flex: 1 1 0;   /* equal share with .cropper-preview-bar below (flex:1 each = 1:1) */
+	/* Cropper dominates the left column — takes remaining height
+	   above the fixed-size preview thumb. Deep neutral background
+	   (Photopea / Figma palette) so both colored photos and
+	   transparent PNGs read clearly; PNG transparency shows as
+	   the same dark gray, and Canvas output with solid fill shows
+	   the fill color, making the two states easy to distinguish. */
+	flex: 1 1 auto;
 	min-height: 0;
 	overflow: hidden;
+	background: #2c2c2c;
+	border-radius: 8px;
 }
 .cropper-image-wrapper img {
 	max-width: 100%;
