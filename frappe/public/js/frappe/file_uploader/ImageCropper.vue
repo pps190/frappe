@@ -115,6 +115,12 @@
 							:title="__('Rotate')"
 							@mousedown.stop="on_comment_rotate_mousedown($event, i)"
 						>↻</div>
+						<div
+							v-if="selected_comment_idx === i && interaction_mode === 'comment'"
+							class="comment-resize-handle"
+							:title="__('Resize')"
+							@mousedown.stop="on_comment_resize_mousedown($event, i)"
+						></div>
 					</div>
 				</div>
 				<div v-if="bg_processing" class="cropper-loading-overlay">
@@ -982,13 +988,11 @@ export default {
 			          this.show_comments || this.show_resize);
 		},
 
-		// Whether to show the 'Drag:' tab row above the cropper. Only
-		// useful when there's a second drag target besides the crop box.
+		// Whether to show the 'Drag:' tab row above the cropper. Always
+		// rendered so toggling watermark / comment on doesn't cause the
+		// layout to shift — the 'Crop box' button is always visible.
 		show_drag_mode_tabs() {
-			return !!(
-				(this.show_watermark && this.wm_enabled && this.wm_loaded && this.wm_mode === "Corner") ||
-				(this.show_comments && this.comments_enabled && this.comment_boxes.length > 0)
-			);
+			return true;
 		},
 
 		// Human-readable output format label for the preview chip.
@@ -1462,6 +1466,23 @@ export default {
 			};
 			e.preventDefault();
 		},
+		on_comment_resize_mousedown(e, i) {
+			if (this.interaction_mode !== "comment") return;
+			const cd = this._canvas_data;
+			if (!cd) return;
+			this.selected_comment_idx = i;
+			this.comment_dragging_idx = i;
+			const box = this.comment_boxes[i];
+			this._comment_drag_start = {
+				mode: "resize",
+				clientX: e.clientX,
+				clientY: e.clientY,
+				origWPct: box.width_pct || 40,
+				origHPct: box.height_pct || 10,
+				origFontPct: box.font_size_pct || 5,
+			};
+			e.preventDefault();
+		},
 		_on_comment_mousemove(e) {
 			if (this.comment_dragging_idx < 0 || !this._comment_drag_start) return;
 			const start = this._comment_drag_start;
@@ -1484,6 +1505,27 @@ export default {
 
 			const cd = this._canvas_data;
 			if (!cd) return;
+
+			if (start.mode === "resize") {
+				const dx = e.clientX - start.clientX;
+				const dy = e.clientY - start.clientY;
+				const dwPct = (dx / cd.width) * 100 * 2;   // ×2 because we resize from center
+				const dhPct = (dy / cd.height) * 100 * 2;
+				const newW = Math.max(5, Math.min(100, start.origWPct + dwPct));
+				const newH = Math.max(2, Math.min(100, start.origHPct + dhPct));
+				// Scale font proportionally with height change (same rule as
+				// CommentBoxEditor's resize handle).
+				const ratio = newH / Math.max(start.origHPct, 0.1);
+				const newFont = Math.max(0.1, Math.min(50, start.origFontPct * ratio));
+				this.$set(this.comment_boxes, i, {
+					...box,
+					width_pct: newW,
+					height_pct: newH,
+					font_size_pct: newFont,
+				});
+				return;
+			}
+
 			const dx = e.clientX - start.clientX;
 			const dy = e.clientY - start.clientY;
 			const dxPct = (dx / cd.width) * 100;
@@ -2493,9 +2535,9 @@ img {
 	gap: 6px;
 }
 .canvas-sublabel {
-	font-size: 11px;
-	color: #606266;
-	font-weight: 500;
+	font-size: 14px;
+	color: #475569;
+	font-weight: 600;
 }
 .canvas-segmented {
 	display: flex;
@@ -2519,7 +2561,7 @@ img {
 	justify-content: space-between;
 	align-items: center;
 	font-weight: 600;
-	font-size: 13px;
+	font-size: 15px;
 }
 
 /* Watermark slider row */
@@ -3006,9 +3048,10 @@ img {
 	flex-wrap: wrap;
 }
 .resize-sublabel {
-	min-width: 52px;
-	font-size: 12px;
-	color: #606266;
+	min-width: 60px;
+	font-size: 14px;
+	font-weight: 600;
+	color: #475569;
 }
 .resize-misc-row {
 	display: flex;
@@ -3021,13 +3064,14 @@ img {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	font-size: 12px;
-	color: #606266;
+	font-size: 15px;
+	color: #475569;
+	font-weight: 500;
 }
 .resize-color {
-	width: 28px;
-	height: 24px;
-	padding: 0;
+	width: 36px;
+	height: 28px;
+	padding: 2px;
 	border: 1px solid #cbd5e1;
 	border-radius: 4px;
 	cursor: pointer;
@@ -3036,10 +3080,17 @@ img {
 .resize-inline-toggle {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
-	font-size: 12px;
-	color: #606266;
+	gap: 8px;
+	font-size: 15px;
+	color: #475569;
+	font-weight: 500;
 	cursor: pointer;
+}
+.resize-inline-toggle input[type="checkbox"] {
+	width: 18px;
+	height: 18px;
+	cursor: pointer;
+	margin: 0;
 }
 .toggle-pill-sublabel {
 	font-size: 10px;
@@ -3127,42 +3178,66 @@ img {
 	gap: 6px;
 }
 .comment-entry-idx {
-	font-size: 11px;
+	font-size: 14px;
 	color: #64748b;
 	font-weight: 600;
-	padding-top: 4px;
-	min-width: 20px;
+	padding-top: 8px;
+	min-width: 28px;
 }
 .comment-text-input {
 	flex: 1;
-	padding: 4px 6px;
+	padding: 8px 10px;
 	border: 1px solid #cbd5e1;
-	border-radius: 4px;
-	font-size: 13px;
+	border-radius: 5px;
+	font-size: 15px;
 	resize: vertical;
-	min-height: 28px;
+	min-height: 42px;
+	font-family: inherit;
+}
+.comment-text-input:focus {
+	outline: none;
+	border-color: #3b82f6;
+	box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 .comment-delete {
-	padding: 2px 8px;
+	padding: 6px 12px;
 	line-height: 1;
+	font-size: 16px;
 }
 .comment-entry-controls {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
+	gap: 10px;
 	align-items: center;
 }
 .comment-control {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
-	font-size: 11px;
-	color: #606266;
+	gap: 6px;
+	font-size: 14px;
+	color: #475569;
+	font-weight: 500;
 }
 .comment-num-input {
-	width: 52px;
-	padding: 2px 4px;
-	font-size: 11px;
+	width: 64px;
+	padding: 6px 8px !important;
+	font-size: 14px !important;
+	border: 1px solid #cbd5e1 !important;
+	border-radius: 5px !important;
+	background: #fff !important;
+	color: #303133 !important;
+	box-sizing: border-box;
+	-moz-appearance: textfield;
+}
+.comment-num-input::-webkit-inner-spin-button,
+.comment-num-input::-webkit-outer-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+.comment-num-input:focus {
+	outline: none;
+	border-color: #3b82f6 !important;
+	box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 .comments-actions {
 	display: flex;
@@ -3206,7 +3281,7 @@ img {
 	box-sizing: border-box;
 	user-select: none;
 	display: flex;
-	align-items: center;
+	align-items: flex-start;   /* text flows from top of the box, not centered */
 	justify-content: center;
 	overflow: hidden;
 	background: rgba(255, 255, 255, 0.02);
@@ -3258,26 +3333,50 @@ img {
 .comment-rotate-handle:active {
 	cursor: grabbing;
 }
+.comment-resize-handle {
+	position: absolute;
+	right: -6px;
+	bottom: -6px;
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
+	background: #3b82f6;
+	border: 2px solid #fff;
+	cursor: nwse-resize;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+	z-index: 5;
+}
 
 /* Enhanced comment entry controls */
 .comment-control-wide {
 	flex: 1;
-	min-width: 130px;
+	min-width: 160px;
 }
 .comment-font-select {
-	font-size: 11px;
-	padding: 2px 4px;
+	font-size: 14px !important;
+	padding: 6px 10px !important;
 	width: 100%;
+	border: 1px solid #cbd5e1 !important;
+	border-radius: 5px !important;
+	background: #fff !important;
+	color: #303133 !important;
+	cursor: pointer;
+	box-sizing: border-box;
+}
+.comment-font-select:focus {
+	outline: none;
+	border-color: #3b82f6 !important;
+	box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 .comment-style-btn {
-	width: 26px;
-	height: 26px;
+	width: 32px;
+	height: 32px;
 	padding: 0;
 	border: 1px solid #cbd5e1;
-	border-radius: 3px;
+	border-radius: 5px;
 	background: #fff;
 	cursor: pointer;
-	font-size: 12px;
+	font-size: 15px;
 	line-height: 1;
 	display: inline-flex;
 	align-items: center;
@@ -3292,27 +3391,27 @@ img {
 	background: #ecf5ff;
 }
 .comment-color-input {
-	width: 28px;
-	height: 26px;
-	padding: 0;
+	width: 36px;
+	height: 32px;
+	padding: 2px;
 	border: 1px solid #cbd5e1;
-	border-radius: 3px;
+	border-radius: 5px;
 	cursor: pointer;
 }
 .comment-align-group {
 	display: inline-flex;
 	border: 1px solid #cbd5e1;
-	border-radius: 3px;
+	border-radius: 5px;
 	overflow: hidden;
 }
 .comment-align-btn {
-	width: 26px;
-	height: 26px;
+	width: 32px;
+	height: 32px;
 	padding: 0;
 	border: none;
 	background: #fff;
 	cursor: pointer;
-	font-size: 11px;
+	font-size: 14px;
 	font-weight: 600;
 	border-right: 1px solid #cbd5e1;
 }
@@ -3328,7 +3427,7 @@ img {
 	box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
 }
 .resize-hint {
-	font-size: 11px;
+	font-size: 14px;
 	color: #94a3b8;
 	font-style: italic;
 }
