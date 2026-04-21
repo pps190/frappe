@@ -680,7 +680,9 @@ export default {
 			resize_mode: "Contain",
 			resize_fill_color: "#FFFFFF",
 			resize_flatten_rgb: true,
-			max_file_size_kb: 2048,
+			// max_file_size_kb intentionally NOT tracked in local state —
+			// it's a global Settings value enforced server-side when a
+			// batch is processed. Single-item uploads don't need it.
 			aspect_ratio_options: ["1:1", "4:3", "16:9", "3:2", "2:3", "Free"],
 			resize_mode_options: ["Contain", "Cover", "Stretch"],
 			// Live preview (new 2026-04) — rerenders on any resize param
@@ -791,7 +793,7 @@ export default {
 			this.resize_mode = this.resize_settings.resize_mode || "Contain";
 			this.resize_fill_color = this.resize_settings.resize_fill_color || "#FFFFFF";
 			this.resize_flatten_rgb = !!this.resize_settings.resize_flatten_rgb;
-			this.max_file_size_kb = this.resize_settings.max_file_size_kb || 2048;
+			// (max_file_size_kb is global Settings only; not read here)
 		}
 
 		// Comments: off by default on new uploads. The user has to opt in
