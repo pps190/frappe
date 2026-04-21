@@ -752,6 +752,16 @@ export default {
 				this.cropper.setAspectRatio(value);
 			}
 		},
+		// Switching tabs should immediately re-render the preview so the
+		// user sees the new tab's settings baked into the thumb. The
+		// other watchers only fire when a value changes — switching
+		// tabs doesn't change any param but the user expects the
+		// preview to reflect what the tab represents (particularly
+		// Canvas, where the user wants to see the target aspect ratio
+		// applied the moment they click the tab).
+		active_tab() {
+			this._schedule_preview_update();
+		},
 		// Any change to resize params → rerender the preview. Debounced
 		// so slider drags don't hammer the off-screen canvas composite.
 		resize_enabled(v) {
@@ -842,7 +852,12 @@ export default {
 			this.resize_aspect = this.resize_settings.resize_aspect || "1:1";
 			this.resize_mode = this.resize_settings.resize_mode || "Contain";
 			this.resize_fill_color = this.resize_settings.resize_fill_color || "#FFFFFF";
-			this.resize_flatten_rgb = !!this.resize_settings.resize_flatten_rgb;
+			// Default to true when the settings object has no explicit
+			// value (undefined) — the doctype default is 1, so a newly
+			// installed site shouldn't accidentally produce transparent
+			// PNGs just because the settings object was cached before
+			// this field existed.
+			this.resize_flatten_rgb = this.resize_settings.resize_flatten_rgb !== false;
 			// (max_file_size_kb is global Settings only; not read here)
 		}
 
