@@ -1,592 +1,614 @@
 <template>
-	<div>
-		<!-- Interaction-mode switcher: shown when multiple drag targets exist
-		     (watermark Corner OR comments enabled). Lets the user pick which
-		     overlay they're dragging. -->
-		<div
-			v-if="(show_watermark && wm_enabled && wm_loaded && wm_mode === 'Corner') || (show_comments && comments_enabled && comment_boxes.length > 0)"
-			class="interaction-switcher"
-		>
-			<span class="interaction-switcher-label">{{ __("Drag on image") }}</span>
-			<div class="segmented-tabs" role="tablist">
-				<button
-					class="segmented-tab"
-					:class="{ active: interaction_mode === 'crop' }"
-					role="tab"
-					:aria-selected="interaction_mode === 'crop'"
-					:title="__('Drag to resize/move the crop box')"
-					@click="set_mode('crop')"
-				>
-					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/></svg>
-					{{ __("Crop box") }}
-				</button>
-				<button
-					v-if="show_watermark && wm_enabled && wm_loaded && wm_mode === 'Corner'"
-					class="segmented-tab"
-					:class="{ active: interaction_mode === 'watermark' }"
-					role="tab"
-					:aria-selected="interaction_mode === 'watermark'"
-					:title="__('Drag to move the watermark logo')"
-					@click="set_mode('watermark')"
-				>
-					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-					{{ __("Watermark") }}
-				</button>
-				<button
-					v-if="show_comments && comments_enabled && comment_boxes.length > 0"
-					class="segmented-tab"
-					:class="{ active: interaction_mode === 'comment' }"
-					role="tab"
-					:aria-selected="interaction_mode === 'comment'"
-					:title="__('Drag to move text comments')"
-					@click="set_mode('comment')"
-				>
-					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-					</svg>
-					{{ __("Comment") }}
-				</button>
-			</div>
-		</div>
-
-		<div
-			class="cropper-image-wrapper"
-			ref="wrapper"
-			:class="{
-				'wm-mode': interaction_mode === 'watermark' && wm_mode === 'Corner',
-				'comment-mode': interaction_mode === 'comment',
-				'bg-processing': bg_processing,
-			}"
-			@mousedown="on_wrapper_mousedown"
-			@wheel.prevent="on_wrapper_wheel"
-			@touchstart="on_wrapper_touchstart"
-		>
-			<img ref="image" :src="src" :alt="file.name" />
-			<canvas
-				v-if="wm_enabled && wm_loaded"
-				ref="wm_canvas"
-				class="watermark-overlay-canvas"
-				:style="{ pointerEvents: (interaction_mode === 'watermark' && wm_mode === 'Corner') ? 'auto' : 'none' }"
-			></canvas>
-			<!-- Comment overlay: DOM boxes drawn on top of the image so user
-			     can see text positioning + drag them. Uses CropperJS image
-			     data to convert percentages → screen pixels. -->
-			<div
-				v-if="show_comments && comments_enabled"
-				class="comment-overlay"
-				:style="comment_overlay_style"
-			>
-				<div
-					v-for="(box, i) in comment_boxes"
-					:key="'overlay-box-' + i"
-					class="comment-overlay-box"
-					:class="{
-						selected: selected_comment_idx === i,
-						dragging: comment_dragging_idx === i,
-					}"
-					:style="comment_box_style(box)"
-					:data-box-idx="i"
-					@mousedown.stop="on_comment_mousedown($event, i)"
-					@touchstart.stop="on_comment_touchstart($event, i)"
-				>
-					<div class="comment-overlay-text" :style="comment_text_style(box)">
-						{{ box.text || __('(empty)') }}
-					</div>
-				</div>
-			</div>
-			<div v-if="bg_processing" class="cropper-loading-overlay">
-				<div class="cropper-spinner"></div>
-				<div class="cropper-loading-text">{{ __("Removing background...") }}</div>
-			</div>
-		</div>
-
-		<!-- ─── Unified Image Adjustments panel ───
-		     Both Remove BG auto-crop padding and Watermark knobs share a single
-		     panel so the dialog stays compact. The top toggles (Remove BG /
-		     Watermark) live in the sticky dialog footer; this panel only hosts
-		     the parameters for whichever features are currently on. -->
-		<div
-			v-if="(show_remove_bg && bg_removed && nobg_bbox) || (show_watermark && wm_enabled) || (show_resize && resize_enabled) || (show_comments && comments_enabled)"
-			class="adjustments-panel"
-		>
-			<!-- Live preview of the final output (what Crop will produce).
-			     Re-renders on any param change via the preview_tick
-			     reactive dependency so the user sees the resize +
-			     watermark + flatten result before committing. -->
-			<div
-				v-if="show_resize && resize_enabled"
-				class="adjustments-row adjustments-row-preview"
-			>
-				<label class="adjustments-field-label">
-					{{ __("Preview") }}
-					<span class="adjustments-field-hint">
-						{{ __("Final output after Crop") }}
-					</span>
-				</label>
-				<div class="resize-preview-wrap">
-					<canvas ref="preview_canvas" class="resize-preview-canvas"></canvas>
-					<div v-if="preview_dims" class="resize-preview-dims">
-						{{ preview_dims.w }}×{{ preview_dims.h }}
-					</div>
-				</div>
-			</div>
-
-			<!-- Resize (FIRST in list per UX spec) — aspect, mode, fill,
-			     flatten. Only shown when the Resize toggle pill is on. -->
-			<div
-				v-if="show_resize && resize_enabled"
-				class="adjustments-row adjustments-row-resize"
-			>
-				<label class="adjustments-field-label">
-					{{ __("Resize") }}
-					<span class="adjustments-field-hint">
-						{{ __("Aspect normalization baked on Crop. Never upscales.") }}
-					</span>
-				</label>
-				<div class="resize-tabs-row">
-					<span class="resize-sublabel">{{ __("Aspect") }}</span>
+	<div class="cropper-grid">
+		<!-- LEFT COLUMN: toolbar + cropper + preview + action buttons -->
+		<div class="cropper-left-col">
+			<!-- Top toolbar: Drag mode (crop/watermark/comment) + Crop ratio.
+			     Wraps to 2 rows on narrow screens. -->
+			<div class="cropper-top-toolbar">
+				<div class="cropper-toolbar-group" v-if="show_drag_mode_tabs">
+					<span class="cropper-toolbar-label">{{ __("Drag") }}:</span>
 					<div class="segmented-tabs" role="tablist">
 						<button
-							v-for="a in aspect_ratio_options"
-							:key="a"
 							class="segmented-tab"
-							:class="{ active: resize_aspect === a }"
-							@click="resize_aspect = a"
-						>{{ a }}</button>
-					</div>
-				</div>
-				<div class="resize-tabs-row">
-					<span class="resize-sublabel">{{ __("Mode") }}</span>
-					<div class="segmented-tabs" role="tablist">
-						<button
-							v-for="m in resize_mode_options"
-							:key="m"
-							class="segmented-tab"
-							:class="{ active: resize_mode === m, disabled: resize_aspect === 'Free' }"
-							:disabled="resize_aspect === 'Free'"
-							@click="resize_mode = m"
-						>{{ __(m) }}</button>
-					</div>
-				</div>
-				<div class="resize-misc-row">
-					<label class="resize-inline-toggle">
-						<input type="checkbox" v-model="resize_flatten_rgb" />
-						<span>{{ __("Solid background") }}</span>
-					</label>
-					<label
-						v-if="resize_flatten_rgb"
-						class="resize-inline-field"
-					>
-						<span>{{ __("Background color") }}</span>
-						<input
-							type="color"
-							class="resize-color"
-							v-model="resize_fill_color"
-						/>
-					</label>
-					<span
-						v-if="!resize_flatten_rgb"
-						class="resize-hint"
-					>
-						{{ __("Transparent background (PNG)") }}
-					</span>
-				</div>
-			</div>
-
-			<!-- Comments (new 2026-04) — simple list editor for single-item
-			     upload. Each entry is a text overlay with position/size/font
-			     controls. No drag UI here (use Item Image Batch for that).
-			     Baked into the Canvas composite on Crop click. -->
-			<div
-				v-if="show_comments && comments_enabled"
-				class="adjustments-row adjustments-row-comments"
-			>
-				<label class="adjustments-field-label">
-					{{ __("Comments") }}
-					<span class="adjustments-field-hint">
-						{{ __("Text baked into the image on Crop.") }}
-					</span>
-				</label>
-
-				<div v-if="comment_boxes.length === 0" class="comments-empty-hint">
-					{{ __("No comments yet.") }}
-				</div>
-
-				<div
-					v-for="(box, i) in comment_boxes"
-					:key="'box-' + i"
-					class="comment-entry"
-					:class="{ 'comment-entry-selected': selected_comment_idx === i }"
-					@click="selected_comment_idx = i"
-				>
-					<div class="comment-entry-header">
-						<span class="comment-entry-idx">#{{ i + 1 }}</span>
-						<textarea
-							class="comment-text-input"
-							:value="box.text"
-							:placeholder="__('Text…')"
-							rows="1"
-							@input="_update_comment(i, 'text', $event.target.value)"
-						></textarea>
-						<button
-							type="button"
-							class="btn btn-xs btn-danger comment-delete"
-							:title="__('Delete comment')"
-							@click.stop="_delete_comment(i)"
-						>×</button>
-					</div>
-
-					<!-- Row 1: Font family + Size + style toggles -->
-					<div class="comment-entry-controls">
-						<label class="comment-control comment-control-wide">
-							<span>{{ __("Font") }}</span>
-							<select class="wm-input comment-font-select"
-								:value="box.font_family"
-								@change="_update_comment(i, 'font_family', $event.target.value)"
-							>
-								<option v-for="f in comment_font_families" :key="f" :value="f">{{ f }}</option>
-							</select>
-						</label>
-						<label class="comment-control">
-							<span>{{ __("Size %") }}</span>
-							<input type="number" class="wm-input comment-num-input"
-								min="1" max="50" step="0.5"
-								:value="box.font_size_pct"
-								@input="_update_comment(i, 'font_size_pct', parseFloat($event.target.value) || 5.0)"
-							/>
-						</label>
-						<button
-							type="button"
-							class="comment-style-btn"
-							:class="{ active: box.font_weight === 'Bold' }"
-							:title="__('Bold')"
-							@click="_update_comment(i, 'font_weight', box.font_weight === 'Bold' ? 'Normal' : 'Bold')"
-						><strong>B</strong></button>
-						<button
-							type="button"
-							class="comment-style-btn"
-							:class="{ active: box.font_style === 'Italic' }"
-							:title="__('Italic')"
-							@click="_update_comment(i, 'font_style', box.font_style === 'Italic' ? 'Normal' : 'Italic')"
-						><em>I</em></button>
-						<input type="color" class="comment-color-input"
-							:title="__('Text color')"
-							:value="box.color"
-							@input="_update_comment(i, 'color', $event.target.value)"
-						/>
-					</div>
-
-					<!-- Row 2: Alignment + position -->
-					<div class="comment-entry-controls">
-						<div class="comment-align-group">
-							<button
-								v-for="a in ['Left', 'Center', 'Right']"
-								:key="'align-' + a"
-								type="button"
-								class="comment-align-btn"
-								:class="{ active: box.align === a }"
-								:title="__(a)"
-								@click="_update_comment(i, 'align', a)"
-							>{{ a.charAt(0) }}</button>
-						</div>
-						<label class="comment-control">
-							<span>X%</span>
-							<input type="number" class="wm-input comment-num-input"
-								min="0" max="100" step="1"
-								:value="Math.round(box.position_x_pct)"
-								@input="_update_comment(i, 'position_x_pct', parseFloat($event.target.value) || 0)"
-							/>
-						</label>
-						<label class="comment-control">
-							<span>Y%</span>
-							<input type="number" class="wm-input comment-num-input"
-								min="0" max="100" step="1"
-								:value="Math.round(box.position_y_pct)"
-								@input="_update_comment(i, 'position_y_pct', parseFloat($event.target.value) || 0)"
-							/>
-						</label>
-						<label class="comment-control">
-							<span>W%</span>
-							<input type="number" class="wm-input comment-num-input"
-								min="5" max="100" step="1"
-								:value="Math.round(box.width_pct)"
-								@input="_update_comment(i, 'width_pct', parseFloat($event.target.value) || 5)"
-							/>
-						</label>
-					</div>
-				</div>
-
-				<div class="comments-actions">
-					<button type="button" class="btn btn-xs btn-primary-light" @click="_add_comment()">
-						+ {{ __("Add Comment") }}
-					</button>
-					<button
-						v-if="comment_presets && comment_presets.length"
-						type="button"
-						class="btn btn-xs btn-default"
-						@click="_toggle_preset_menu()"
-					>
-						📋 {{ __("Presets") }}
-					</button>
-					<div v-if="preset_menu_open" class="comment-preset-menu">
-						<div
-							v-for="(p, pi) in comment_presets"
-							:key="'preset-' + pi"
-							class="comment-preset-item"
-							@click="_insert_preset(p)"
+							:class="{ active: interaction_mode === 'crop' }"
+							role="tab"
+							:aria-selected="interaction_mode === 'crop'"
+							:title="__('Drag to resize/move the crop box')"
+							@click="set_mode('crop')"
 						>
-							{{ p.text || __("(no text)") }}
-						</div>
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/></svg>
+							{{ __("Crop box") }}
+						</button>
+						<button
+							v-if="show_watermark && wm_enabled && wm_loaded && wm_mode === 'Corner'"
+							class="segmented-tab"
+							:class="{ active: interaction_mode === 'watermark' }"
+							role="tab"
+							:aria-selected="interaction_mode === 'watermark'"
+							:title="__('Drag to move the watermark logo')"
+							@click="set_mode('watermark')"
+						>
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+							{{ __("Watermark") }}
+						</button>
+						<button
+							v-if="show_comments && comments_enabled && comment_boxes.length > 0"
+							class="segmented-tab"
+							:class="{ active: interaction_mode === 'comment' }"
+							role="tab"
+							:aria-selected="interaction_mode === 'comment'"
+							:title="__('Drag to move text comments')"
+							@click="set_mode('comment')"
+						>
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+							{{ __("Comment") }}
+						</button>
 					</div>
 				</div>
-
-				<div class="wm-panel-actions">
-					<button class="btn btn-xs btn-default" @click="_reset_comments_to_defaults">
-						{{ __("Reset") }}
-					</button>
-					<button class="btn btn-xs btn-primary-light" @click="_save_comment_defaults">
-						{{ __("Save Style as Default") }}
-					</button>
+				<div class="cropper-toolbar-group" v-if="fixed_aspect_ratio == null">
+					<span class="cropper-toolbar-label">{{ __("Crop ratio") }}:</span>
+					<div class="btn-group btn-group-sm">
+						<button
+							v-for="button in aspect_ratio_buttons"
+							type="button"
+							class="btn btn-default btn-sm"
+							:class="{
+								active: isNaN(aspect_ratio)
+									? isNaN(button.value)
+									: button.value === aspect_ratio,
+							}"
+							:key="button.label"
+							@click="aspect_ratio = button.value"
+						>
+							{{ button.label }}
+						</button>
+					</div>
 				</div>
 			</div>
 
-			<!-- Auto-crop padding (Remove BG) — only shown when Remove BG is on
-			     AND a bbox is available. -->
+			<!-- Cropper canvas — main image with all overlays -->
 			<div
-				v-if="show_remove_bg && bg_removed && nobg_bbox"
-				class="adjustments-row"
+				class="cropper-image-wrapper"
+				ref="wrapper"
+				:class="{
+					'wm-mode': interaction_mode === 'watermark' && wm_mode === 'Corner',
+					'comment-mode': interaction_mode === 'comment',
+					'bg-processing': bg_processing,
+				}"
+				@mousedown="on_wrapper_mousedown"
+				@wheel.prevent="on_wrapper_wheel"
+				@touchstart="on_wrapper_touchstart"
 			>
-				<label class="adjustments-field-label">
-					{{ __("Auto-crop padding") }}
-				</label>
-				<div class="padding-input-row">
-					<input
-						type="range"
-						class="wm-slider"
-						min="-20" max="40" step="1"
-						:value="effective_padding_pct"
-						@input="set_padding_pct(parseInt($event.target.value))"
-					/>
-					<div class="wm-input-group padding-input-group">
-						<input
-							type="number"
-							class="wm-input"
-							min="-20" max="40" step="1"
-							:value="effective_padding_pct"
-							@input="set_padding_pct(parseInt($event.target.value))"
-						/>
-						<span class="wm-input-suffix">%</span>
+				<img ref="image" :src="src" :alt="file.name" />
+				<canvas
+					v-if="wm_enabled && wm_loaded"
+					ref="wm_canvas"
+					class="watermark-overlay-canvas"
+					:style="{ pointerEvents: (interaction_mode === 'watermark' && wm_mode === 'Corner') ? 'auto' : 'none' }"
+				></canvas>
+				<!-- Comment overlay: DOM boxes drawn on top of the image so
+				     the user can see text positioning + drag them. -->
+				<div
+					v-if="show_comments && comments_enabled"
+					class="comment-overlay"
+					:style="comment_overlay_style"
+				>
+					<div
+						v-for="(box, i) in comment_boxes"
+						:key="'overlay-box-' + i"
+						class="comment-overlay-box"
+						:class="{
+							selected: selected_comment_idx === i,
+							dragging: comment_dragging_idx === i,
+						}"
+						:style="comment_box_style(box)"
+						:data-box-idx="i"
+						@mousedown.stop="on_comment_mousedown($event, i)"
+						@touchstart.stop="on_comment_touchstart($event, i)"
+					>
+						<div class="comment-overlay-text" :style="comment_text_style(box)">
+							{{ box.text || __('(empty)') }}
+						</div>
 					</div>
 				</div>
-				<div class="wm-panel-actions">
-					<button class="btn btn-xs btn-default" @click="reset_padding_pct">
-						{{ __("Reset") }}
-					</button>
-					<button class="btn btn-xs btn-primary-light" @click="save_padding_default">
-						{{ __("Save as Default") }}
-					</button>
+				<div v-if="bg_processing" class="cropper-loading-overlay">
+					<div class="cropper-spinner"></div>
+					<div class="cropper-loading-text">{{ __("Removing background...") }}</div>
 				</div>
 			</div>
-			<div
-				v-else-if="show_remove_bg && bg_removed && !nobg_bbox"
-				class="adjustments-row adjustments-warn"
-			>
-				{{ __("Auto-crop not available — microservice did not return a bounding box.") }}
+
+			<!-- Preview strip: live thumbnail + chip summary of what's on -->
+			<div class="cropper-preview-bar" v-if="any_feature_on">
+				<div class="cropper-preview-thumb">
+					<canvas ref="preview_canvas" class="resize-preview-canvas"></canvas>
+					<div v-if="preview_dims" class="cropper-preview-dims">
+						{{ preview_dims.w }} × {{ preview_dims.h }} {{ preview_format_label }}
+					</div>
+				</div>
+				<div class="cropper-preview-body">
+					<div class="cropper-preview-title">
+						{{ __("Preview") }}
+						<span class="cropper-preview-hint">{{ __("final output after Crop") }}</span>
+					</div>
+					<div class="cropper-preview-chips">
+						<span v-if="show_remove_bg && bg_removed" class="cropper-preview-chip">{{ __("Remove BG") }}</span>
+						<span v-if="show_watermark && wm_enabled" class="cropper-preview-chip">
+							{{ __("Watermark") }} · {{ wm_mode === "Tiled" ? __("Tiled") : __("Corner") }}
+						</span>
+						<span v-if="show_comments && comments_enabled && comment_boxes.length" class="cropper-preview-chip">
+							{{ __("Comments") }} · {{ comment_boxes.length }}
+						</span>
+						<span v-if="show_resize && resize_enabled" class="cropper-preview-chip">
+							{{ __("Canvas") }} · {{ resize_aspect }}
+						</span>
+					</div>
+				</div>
 			</div>
 
-			<!-- Watermark controls — only shown when Watermark is on. -->
-			<div v-if="show_watermark && wm_enabled" class="adjustments-row adjustments-row-wm">
-				<!-- Segmented tab control: Tiled first, Corner second. -->
-				<div class="segmented-tabs" role="tablist">
+			<!-- Bottom action row: Back / Crop -->
+			<div class="image-cropper-actions" ref="actions">
+				<div><!-- spacer for flex layout; no left actions --></div>
+				<div>
 					<button
-						class="segmented-tab"
-						:class="{ active: wm_mode === 'Tiled' }"
-						role="tab"
-						:aria-selected="wm_mode === 'Tiled'"
-						:title="__('Tiled — covers the whole image, not draggable')"
-						@click="wm_set_mode('Tiled')"
+						class="btn btn-sm margin-right"
+						@click="$emit('toggle_image_cropper')"
+						v-if="fixed_aspect_ratio == null"
 					>
-						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-						{{ __("Tiled") }}
+						{{ __("Back") }}
 					</button>
-					<button
-						class="segmented-tab"
-						:class="{ active: wm_mode === 'Corner' }"
-						role="tab"
-						:aria-selected="wm_mode === 'Corner'"
-						:title="__('Corner — single logo at a fixed position, draggable')"
-						@click="wm_set_mode('Corner')"
-					>
-						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L12 12"/><rect x="2" y="14" width="10" height="8" rx="1"/></svg>
-						{{ __("Corner") }}
-					</button>
-				</div>
-
-				<!-- Tiled mode controls -->
-				<template v-if="wm_mode === 'Tiled'">
-					<div class="wm-sliders-row">
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Opacity") }}</label>
-							<input type="range" class="wm-slider" min="5" max="100"
-								:value="wm_tile_opacity" @input="wm_set_tile_opacity(parseInt($event.target.value))" />
-							<span class="wm-slider-value">{{ wm_tile_opacity }}%</span>
-						</div>
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Tile Size") }}</label>
-							<input type="range" class="wm-slider" min="3" max="80"
-								:value="wm_tile_size" @input="wm_set_tile_size(parseInt($event.target.value))" />
-							<span class="wm-slider-value">{{ Math.round(wm_tile_size) }}%</span>
-						</div>
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Rotation") }}</label>
-							<input type="range" class="wm-slider" min="-180" max="180"
-								:value="wm_tile_rotation" @input="wm_set_tile_rotation(parseInt($event.target.value))" />
-							<span class="wm-slider-value">{{ wm_tile_rotation }}°</span>
-						</div>
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Spacing") }}</label>
-							<input type="range" class="wm-slider" min="0" max="100"
-								:value="wm_tile_spacing" @input="wm_set_tile_spacing(parseInt($event.target.value))" />
-							<span class="wm-slider-value">{{ wm_tile_spacing }}%</span>
-						</div>
-					</div>
-				</template>
-
-				<!-- Corner mode controls -->
-				<template v-if="wm_mode === 'Corner'">
-					<div class="wm-sliders-row">
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Opacity") }}</label>
-							<input type="range" class="wm-slider" min="5" max="100"
-								:value="wm_opacity" @input="wm_set_opacity(parseInt($event.target.value))" />
-							<span class="wm-slider-value">{{ wm_opacity }}%</span>
-						</div>
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Size") }}</label>
-							<input type="range" class="wm-slider" min="5" max="100"
-								:value="wm_size" @input="wm_set_size(parseFloat($event.target.value))" />
-							<span class="wm-slider-value">{{ Math.round(wm_size) }}%</span>
-						</div>
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Position X") }}</label>
-							<input type="range" class="wm-slider" min="0" max="100"
-								:value="wm_pos_x" @input="wm_set_pos_x(parseFloat($event.target.value))" />
-							<span class="wm-slider-value">{{ Math.round(wm_pos_x) }}%</span>
-						</div>
-						<div class="wm-slider-field">
-							<label class="wm-control-label">{{ __("Position Y") }}</label>
-							<input type="range" class="wm-slider" min="0" max="100"
-								:value="wm_pos_y" @input="wm_set_pos_y(parseFloat($event.target.value))" />
-							<span class="wm-slider-value">{{ Math.round(wm_pos_y) }}%</span>
-						</div>
-					</div>
-				</template>
-
-				<div class="wm-panel-actions">
-					<button class="btn btn-xs btn-default" @click="wm_reset_defaults">
-						{{ __("Reset") }}
-					</button>
-					<button class="btn btn-xs btn-primary-light" @click="wm_save_defaults">
-						{{ __("Save as Default") }}
+					<button class="btn btn-primary btn-sm" :disabled="bg_processing" @click="crop_image">
+						{{ __("Crop") }}
 					</button>
 				</div>
 			</div>
 		</div>
 
-		<div class="image-cropper-actions" ref="actions">
-			<div class="cropper-left-actions">
-				<div class="btn-group" v-if="fixed_aspect_ratio == null">
-					<button
-						v-for="button in aspect_ratio_buttons"
-						type="button"
-						class="btn btn-default btn-sm"
-						:class="{
-							active: isNaN(aspect_ratio)
-								? isNaN(button.value)
-								: button.value === aspect_ratio,
-						}"
-						:key="button.label"
-						@click="aspect_ratio = button.value"
-					>
-						{{ button.label }}
-					</button>
-				</div>
-				<div
-					v-if="show_remove_bg"
-					class="toggle-pill"
-					:class="{ active: bg_removed, processing: bg_processing }"
-					@click="toggle_remove_bg"
-				>
-					<span class="toggle-pill-label">{{ __("Remove BG") }}</span>
-					<span class="toggle-pill-switch">
-						<span class="toggle-pill-track" :class="{ on: bg_removed }">
-							<span class="toggle-pill-thumb"></span>
-						</span>
-					</span>
-				</div>
-				<div
-					v-if="show_watermark"
-					class="toggle-pill"
-					:class="{ active: wm_enabled }"
-					@click="toggle_watermark"
-				>
-					<span class="toggle-pill-label">{{ __("Watermark") }}</span>
-					<span class="toggle-pill-switch">
-						<span class="toggle-pill-track" :class="{ on: wm_enabled }">
-							<span class="toggle-pill-thumb"></span>
-						</span>
-					</span>
-				</div>
-				<div
-					v-if="show_resize"
-					class="toggle-pill"
-					:class="{ active: resize_enabled }"
-					@click="resize_enabled = !resize_enabled"
-					:title="__('Normalize output aspect ({0}, {1})', [resize_aspect, resize_mode])"
-				>
-					<span class="toggle-pill-label">
-						{{ __("Resize") }}
-						<span v-if="resize_enabled" class="toggle-pill-sublabel">
-							{{ resize_aspect }}
-						</span>
-					</span>
-					<span class="toggle-pill-switch">
-						<span class="toggle-pill-track" :class="{ on: resize_enabled }">
-							<span class="toggle-pill-thumb"></span>
-						</span>
-					</span>
-				</div>
-				<div
-					v-if="show_comments"
-					class="toggle-pill"
-					:class="{ active: comments_enabled }"
-					@click="comments_enabled = !comments_enabled"
-					:title="__('Add text comments baked into the image')"
-				>
-					<span class="toggle-pill-label">
-						{{ __("Comments") }}
-						<span v-if="comments_enabled && comment_boxes.length > 0" class="toggle-pill-sublabel">
-							{{ comment_boxes.length }}
-						</span>
-					</span>
-					<span class="toggle-pill-switch">
-						<span class="toggle-pill-track" :class="{ on: comments_enabled }">
-							<span class="toggle-pill-thumb"></span>
-						</span>
-					</span>
-				</div>
-			</div>
-			<div>
+		<!-- RIGHT COLUMN: tabbed feature panel -->
+		<div class="cropper-right-col" v-if="any_feature_shown">
+			<div class="cropper-feature-tabs">
 				<button
-					class="btn btn-sm margin-right"
-					@click="$emit('toggle_image_cropper')"
-					v-if="fixed_aspect_ratio == null"
+					v-if="show_remove_bg"
+					type="button"
+					class="cropper-feature-tab"
+					:class="{ active: active_tab === 'remove_bg' }"
+					@click="active_tab = 'remove_bg'"
 				>
-					{{ __("Back") }}
+					<span class="cropper-feature-tab-label">{{ __("Remove BG") }}</span>
+					<span class="cropper-feature-tab-state" :class="bg_removed ? 'on' : 'off'">
+						<span class="cropper-feature-tab-dot"></span>
+						{{ bg_removed ? __("on") : __("off") }}
+					</span>
 				</button>
-				<button class="btn btn-primary btn-sm" :disabled="bg_processing" @click="crop_image">
-					{{ __("Crop") }}
+				<button
+					v-if="show_watermark"
+					type="button"
+					class="cropper-feature-tab"
+					:class="{ active: active_tab === 'watermark' }"
+					@click="active_tab = 'watermark'"
+				>
+					<span class="cropper-feature-tab-label">{{ __("Watermark") }}</span>
+					<span class="cropper-feature-tab-state" :class="wm_enabled ? 'on' : 'off'">
+						<span class="cropper-feature-tab-dot"></span>
+						{{ wm_enabled ? __("on") : __("off") }}
+					</span>
 				</button>
+				<button
+					v-if="show_comments"
+					type="button"
+					class="cropper-feature-tab"
+					:class="{ active: active_tab === 'comments' }"
+					@click="active_tab = 'comments'"
+				>
+					<span class="cropper-feature-tab-label">{{ __("Comments") }}</span>
+					<span class="cropper-feature-tab-state" :class="comments_enabled ? 'on' : 'off'">
+						<span class="cropper-feature-tab-dot"></span>
+						{{ comments_enabled ? __("on") : __("off") }}
+					</span>
+				</button>
+				<button
+					v-if="show_resize"
+					type="button"
+					class="cropper-feature-tab"
+					:class="{ active: active_tab === 'canvas' }"
+					@click="active_tab = 'canvas'"
+				>
+					<span class="cropper-feature-tab-label">{{ __("Canvas") }}</span>
+					<span class="cropper-feature-tab-state" :class="resize_enabled ? 'on' : 'off'">
+						<span class="cropper-feature-tab-dot"></span>
+						{{ resize_enabled ? __("on") : __("off") }}
+					</span>
+				</button>
+			</div>
+
+			<div class="cropper-tab-body">
+				<!-- REMOVE BG TAB -->
+				<div v-show="active_tab === 'remove_bg'" class="cropper-tab-pane">
+					<div class="cropper-tab-enable">
+						<span class="cropper-tab-enable-label">{{ __("Enable Remove Background") }}</span>
+						<div
+							class="toggle-pill toggle-pill-compact"
+							:class="{ active: bg_removed, processing: bg_processing }"
+							@click="toggle_remove_bg"
+						>
+							<span class="toggle-pill-switch">
+								<span class="toggle-pill-track" :class="{ on: bg_removed }">
+									<span class="toggle-pill-thumb"></span>
+								</span>
+							</span>
+						</div>
+					</div>
+					<div v-if="bg_removed && nobg_bbox" class="adjustments-row">
+						<label class="adjustments-field-label">{{ __("Auto-crop padding") }}</label>
+						<div class="padding-input-row">
+							<input
+								type="range" class="wm-slider"
+								min="-20" max="40" step="1"
+								:value="effective_padding_pct"
+								@input="set_padding_pct(parseInt($event.target.value))"
+							/>
+							<div class="wm-input-group padding-input-group">
+								<input
+									type="number" class="wm-input"
+									min="-20" max="40" step="1"
+									:value="effective_padding_pct"
+									@input="set_padding_pct(parseInt($event.target.value))"
+								/>
+								<span class="wm-input-suffix">%</span>
+							</div>
+						</div>
+						<div class="wm-panel-actions">
+							<button class="btn btn-xs btn-default" @click="reset_padding_pct">{{ __("Reset") }}</button>
+							<button class="btn btn-xs btn-primary-light" @click="save_padding_default">{{ __("Save as Default") }}</button>
+						</div>
+					</div>
+					<div v-else-if="bg_removed && !nobg_bbox" class="adjustments-row adjustments-warn">
+						{{ __("Auto-crop not available — microservice did not return a bounding box.") }}
+					</div>
+				</div>
+
+				<!-- WATERMARK TAB -->
+				<div v-show="active_tab === 'watermark'" class="cropper-tab-pane">
+					<div class="cropper-tab-enable">
+						<span class="cropper-tab-enable-label">{{ __("Enable Watermark") }}</span>
+						<div
+							class="toggle-pill toggle-pill-compact"
+							:class="{ active: wm_enabled }"
+							@click="toggle_watermark"
+						>
+							<span class="toggle-pill-switch">
+								<span class="toggle-pill-track" :class="{ on: wm_enabled }">
+									<span class="toggle-pill-thumb"></span>
+								</span>
+							</span>
+						</div>
+					</div>
+					<div v-if="wm_enabled" class="adjustments-row adjustments-row-wm">
+						<div class="segmented-tabs" role="tablist">
+							<button
+								class="segmented-tab"
+								:class="{ active: wm_mode === 'Tiled' }"
+								role="tab"
+								:aria-selected="wm_mode === 'Tiled'"
+								:title="__('Tiled — covers the whole image, not draggable')"
+								@click="wm_set_mode('Tiled')"
+							>
+								<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+								{{ __("Tiled") }}
+							</button>
+							<button
+								class="segmented-tab"
+								:class="{ active: wm_mode === 'Corner' }"
+								role="tab"
+								:aria-selected="wm_mode === 'Corner'"
+								:title="__('Corner — single logo at a fixed position, draggable')"
+								@click="wm_set_mode('Corner')"
+							>
+								<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L12 12"/><rect x="2" y="14" width="10" height="8" rx="1"/></svg>
+								{{ __("Corner") }}
+							</button>
+						</div>
+
+						<template v-if="wm_mode === 'Tiled'">
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Opacity") }}</label>
+								<input type="range" class="wm-slider" min="5" max="100"
+									:value="wm_tile_opacity"
+									@input="wm_tile_opacity = parseInt($event.target.value)" />
+								<span class="wm-slider-value">{{ wm_tile_opacity }}%</span>
+							</div>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Tile Size") }}</label>
+								<input type="range" class="wm-slider" min="5" max="80"
+									:value="wm_tile_size"
+									@input="wm_tile_size = parseFloat($event.target.value)" />
+								<span class="wm-slider-value">{{ Math.round(wm_tile_size) }}%</span>
+							</div>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Rotation") }}</label>
+								<input type="range" class="wm-slider" min="-180" max="180"
+									:value="wm_tile_rotation"
+									@input="wm_tile_rotation = parseInt($event.target.value)" />
+								<span class="wm-slider-value">{{ wm_tile_rotation }}°</span>
+							</div>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Spacing") }}</label>
+								<input type="range" class="wm-slider" min="0" max="100"
+									:value="wm_tile_spacing"
+									@input="wm_tile_spacing = parseInt($event.target.value)" />
+								<span class="wm-slider-value">{{ wm_tile_spacing }}%</span>
+							</div>
+						</template>
+
+						<template v-else>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Opacity") }}</label>
+								<input type="range" class="wm-slider" min="5" max="100"
+									:value="wm_opacity"
+									@input="wm_opacity = parseInt($event.target.value)" />
+								<span class="wm-slider-value">{{ wm_opacity }}%</span>
+							</div>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Size") }}</label>
+								<input type="range" class="wm-slider" min="5" max="100"
+									:value="wm_size"
+									@input="wm_size = parseFloat($event.target.value)" />
+								<span class="wm-slider-value">{{ Math.round(wm_size) }}%</span>
+							</div>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Position X") }}</label>
+								<input type="range" class="wm-slider" min="0" max="100"
+									:value="wm_pos_x"
+									@input="wm_pos_x = parseFloat($event.target.value)" />
+								<span class="wm-slider-value">{{ Math.round(wm_pos_x) }}%</span>
+							</div>
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Position Y") }}</label>
+								<input type="range" class="wm-slider" min="0" max="100"
+									:value="wm_pos_y"
+									@input="wm_pos_y = parseFloat($event.target.value)" />
+								<span class="wm-slider-value">{{ Math.round(wm_pos_y) }}%</span>
+							</div>
+						</template>
+
+						<div class="wm-panel-actions">
+							<button class="btn btn-xs btn-default" @click="wm_reset_defaults">{{ __("Reset") }}</button>
+							<button class="btn btn-xs btn-primary-light" @click="wm_save_defaults">{{ __("Save as Default") }}</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- COMMENTS TAB -->
+				<div v-show="active_tab === 'comments'" class="cropper-tab-pane">
+					<div class="cropper-tab-enable">
+						<span class="cropper-tab-enable-label">{{ __("Enable Comments") }}</span>
+						<div
+							class="toggle-pill toggle-pill-compact"
+							:class="{ active: comments_enabled }"
+							@click="comments_enabled = !comments_enabled"
+						>
+							<span class="toggle-pill-switch">
+								<span class="toggle-pill-track" :class="{ on: comments_enabled }">
+									<span class="toggle-pill-thumb"></span>
+								</span>
+							</span>
+						</div>
+					</div>
+					<div v-if="comments_enabled" class="adjustments-row adjustments-row-comments">
+						<div class="comments-header">
+							<span>{{ __("Comments ({0})", [comment_boxes.length]) }}</span>
+							<div class="comments-actions">
+								<button type="button" class="btn btn-xs btn-primary-light" @click="_add_comment()">
+									+ {{ __("Add") }}
+								</button>
+								<button
+									v-if="comment_presets && comment_presets.length"
+									type="button"
+									class="btn btn-xs btn-default"
+									@click="_toggle_preset_menu()"
+								>
+									📋 {{ __("Presets") }}
+								</button>
+								<div v-if="preset_menu_open" class="comment-preset-menu">
+									<div
+										v-for="(p, pi) in comment_presets"
+										:key="'preset-' + pi"
+										class="comment-preset-item"
+										@click="_insert_preset(p)"
+									>
+										{{ p.text || __("(no text)") }}
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div v-if="comment_boxes.length === 0" class="comments-empty-hint">
+							{{ __('No comments yet. Click "+ Add" or pick a preset.') }}
+						</div>
+
+						<div
+							v-for="(box, i) in comment_boxes"
+							:key="'box-' + i"
+							class="comment-entry"
+							:class="{ 'comment-entry-selected': selected_comment_idx === i }"
+							@click="selected_comment_idx = i"
+						>
+							<div class="comment-entry-header">
+								<span class="comment-entry-idx">#{{ i + 1 }}</span>
+								<textarea
+									class="comment-text-input"
+									:value="box.text"
+									:placeholder="__('Text…')"
+									rows="1"
+									@input="_update_comment(i, 'text', $event.target.value)"
+								></textarea>
+								<button
+									type="button"
+									class="btn btn-xs btn-danger comment-delete"
+									:title="__('Delete comment')"
+									@click.stop="_delete_comment(i)"
+								>×</button>
+							</div>
+
+							<div class="comment-entry-controls">
+								<label class="comment-control comment-control-wide">
+									<span>{{ __("Font") }}</span>
+									<select class="wm-input comment-font-select"
+										:value="box.font_family"
+										@change="_update_comment(i, 'font_family', $event.target.value)"
+									>
+										<option v-for="f in comment_font_families" :key="f" :value="f">{{ f }}</option>
+									</select>
+								</label>
+								<label class="comment-control">
+									<span>{{ __("Size %") }}</span>
+									<input type="number" class="wm-input comment-num-input"
+										min="1" max="50" step="0.5"
+										:value="box.font_size_pct"
+										@input="_update_comment(i, 'font_size_pct', parseFloat($event.target.value) || 5.0)"
+									/>
+								</label>
+								<button
+									type="button"
+									class="comment-style-btn"
+									:class="{ active: box.font_weight === 'Bold' }"
+									:title="__('Bold')"
+									@click="_update_comment(i, 'font_weight', box.font_weight === 'Bold' ? 'Normal' : 'Bold')"
+								><strong>B</strong></button>
+								<button
+									type="button"
+									class="comment-style-btn"
+									:class="{ active: box.font_style === 'Italic' }"
+									:title="__('Italic')"
+									@click="_update_comment(i, 'font_style', box.font_style === 'Italic' ? 'Normal' : 'Italic')"
+								><em>I</em></button>
+								<input type="color" class="comment-color-input"
+									:title="__('Text color')"
+									:value="box.color"
+									@input="_update_comment(i, 'color', $event.target.value)"
+								/>
+							</div>
+
+							<div class="comment-entry-controls">
+								<div class="comment-align-group">
+									<button
+										v-for="a in ['Left', 'Center', 'Right']"
+										:key="'align-' + a"
+										type="button"
+										class="comment-align-btn"
+										:class="{ active: box.align === a }"
+										:title="__(a)"
+										@click="_update_comment(i, 'align', a)"
+									>{{ a.charAt(0) }}</button>
+								</div>
+								<label class="comment-control">
+									<span>X%</span>
+									<input type="number" class="wm-input comment-num-input"
+										min="0" max="100" step="1"
+										:value="Math.round(box.position_x_pct)"
+										@input="_update_comment(i, 'position_x_pct', parseFloat($event.target.value) || 0)"
+									/>
+								</label>
+								<label class="comment-control">
+									<span>Y%</span>
+									<input type="number" class="wm-input comment-num-input"
+										min="0" max="100" step="1"
+										:value="Math.round(box.position_y_pct)"
+										@input="_update_comment(i, 'position_y_pct', parseFloat($event.target.value) || 0)"
+									/>
+								</label>
+								<label class="comment-control">
+									<span>W%</span>
+									<input type="number" class="wm-input comment-num-input"
+										min="5" max="100" step="1"
+										:value="Math.round(box.width_pct)"
+										@input="_update_comment(i, 'width_pct', parseFloat($event.target.value) || 5)"
+									/>
+								</label>
+							</div>
+						</div>
+
+						<div class="wm-panel-actions">
+							<button class="btn btn-xs btn-default" @click="_reset_comments_to_defaults">
+								{{ __("Reset") }}
+							</button>
+							<button class="btn btn-xs btn-primary-light" @click="_save_comment_defaults">
+								{{ __("Save Style as Default") }}
+							</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- CANVAS TAB (was Resize / Output Shape) -->
+				<div v-show="active_tab === 'canvas'" class="cropper-tab-pane">
+					<div class="cropper-tab-enable">
+						<span class="cropper-tab-enable-label">{{ __("Enable Canvas normalization") }}</span>
+						<div
+							class="toggle-pill toggle-pill-compact"
+							:class="{ active: resize_enabled }"
+							@click="resize_enabled = !resize_enabled"
+						>
+							<span class="toggle-pill-switch">
+								<span class="toggle-pill-track" :class="{ on: resize_enabled }">
+									<span class="toggle-pill-thumb"></span>
+								</span>
+							</span>
+						</div>
+					</div>
+					<div v-if="resize_enabled" class="adjustments-row adjustments-row-resize">
+						<div class="canvas-field">
+							<span class="canvas-sublabel">{{ __("Aspect") }}</span>
+							<div class="segmented-tabs canvas-segmented">
+								<button
+									v-for="a in aspect_ratio_options"
+									:key="a"
+									class="segmented-tab"
+									:class="{ active: resize_aspect === a }"
+									@click="resize_aspect = a"
+								>{{ a }}</button>
+							</div>
+						</div>
+						<div class="canvas-field">
+							<span class="canvas-sublabel">{{ __("Fit mode") }}</span>
+							<div class="segmented-tabs canvas-segmented">
+								<button
+									v-for="m in resize_mode_options"
+									:key="m"
+									class="segmented-tab"
+									:class="{ active: resize_mode === m, disabled: resize_aspect === 'Free' }"
+									:disabled="resize_aspect === 'Free'"
+									@click="resize_mode = m"
+								>{{ __(m) }}</button>
+							</div>
+						</div>
+						<div class="canvas-misc-row">
+							<label class="resize-inline-toggle">
+								<input type="checkbox" v-model="resize_flatten_rgb" />
+								<span>{{ __("Solid background") }}</span>
+							</label>
+							<label
+								v-if="resize_flatten_rgb"
+								class="resize-inline-field"
+							>
+								<span>{{ __("Color") }}</span>
+								<input
+									type="color"
+									class="resize-color"
+									v-model="resize_fill_color"
+								/>
+							</label>
+							<span
+								v-if="!resize_flatten_rgb"
+								class="resize-hint"
+							>
+								{{ __("Transparent background (PNG)") }}
+							</span>
+						</div>
+						<div class="wm-panel-actions">
+							<button class="btn btn-xs btn-default" @click="_reset_canvas_defaults">{{ __("Reset") }}</button>
+							<button class="btn btn-xs btn-primary-light" @click="_save_canvas_defaults">{{ __("Save as Default") }}</button>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -681,6 +703,10 @@ export default {
 				"Arial", "Helvetica", "Times New Roman",
 				"Courier New", "Georgia", "Verdana",
 			],
+			// Active tab in the right-side panel — "remove_bg" / "watermark"
+			// / "comments" / "canvas". Reset in mounted() to the first
+			// available feature so the right column opens on something.
+			active_tab: "remove_bg",
 		};
 	},
 	watch: {
@@ -717,6 +743,13 @@ export default {
 		},
 	},
 	mounted() {
+		// Initial active tab — open on the first feature that's shown.
+		// Priority: Remove BG → Watermark → Comments → Canvas.
+		if (this.show_remove_bg) this.active_tab = "remove_bg";
+		else if (this.show_watermark) this.active_tab = "watermark";
+		else if (this.show_comments) this.active_tab = "comments";
+		else if (this.show_resize) this.active_tab = "canvas";
+
 		// Remove BG: cached files + bbox metadata (Phase 1)
 		this.original_file = this.file._original_file || this.file.cropper_file;
 		this.nobg_file = this.file._nobg_file || null;
@@ -878,6 +911,49 @@ export default {
 				// so watermark + crop drag still work from the same pixels.
 				pointerEvents: this.interaction_mode === "comment" ? "auto" : "none",
 			};
+		},
+
+		// At least one feature has been turned ON by the user or the
+		// prop defaults. Used to decide whether to render the preview
+		// strip (nothing to preview if everything is off).
+		any_feature_on() {
+			return (
+				(this.show_remove_bg && this.bg_removed) ||
+				(this.show_watermark && this.wm_enabled) ||
+				(this.show_comments && this.comments_enabled) ||
+				(this.show_resize && this.resize_enabled)
+			);
+		},
+
+		// At least one feature's UI is available on this cropper invocation
+		// (prop opted in). Controls whether the right-side tabbed panel
+		// renders at all — if the user opened the cropper with none of the
+		// features enabled, the panel is hidden and the cropper is full-width.
+		any_feature_shown() {
+			return !!(this.show_remove_bg || this.show_watermark ||
+			          this.show_comments || this.show_resize);
+		},
+
+		// Whether to show the 'Drag:' tab row above the cropper. Only
+		// useful when there's a second drag target besides the crop box.
+		show_drag_mode_tabs() {
+			return !!(
+				(this.show_watermark && this.wm_enabled && this.wm_loaded && this.wm_mode === "Corner") ||
+				(this.show_comments && this.comments_enabled && this.comment_boxes.length > 0)
+			);
+		},
+
+		// Human-readable output format label for the preview chip.
+		// Determined by what's on: flatten forces JPEG, otherwise PNG.
+		preview_format_label() {
+			if (this.show_resize && this.resize_enabled && this.resize_flatten_rgb) {
+				return "JPEG";
+			}
+			if (this.bg_removed || this.wm_enabled ||
+			    (this.show_comments && this.comments_enabled && this.comment_boxes.length)) {
+				return "PNG";
+			}
+			return "";
 		},
 	},
 	methods: {
@@ -1355,6 +1431,35 @@ export default {
 				},
 				callback: () => {
 					frappe.show_alert({ message: __("Comment style saved as default"), indicator: "green" });
+				},
+			});
+		},
+
+		// ── Canvas (resize + fill + flatten) reset / save ──
+		_reset_canvas_defaults() {
+			const s = this.resize_settings || {};
+			this.resize_enabled = s.resize_enabled !== undefined ? !!s.resize_enabled : true;
+			this.resize_aspect = s.resize_aspect || "1:1";
+			this.resize_mode = s.resize_mode || "Contain";
+			this.resize_fill_color = s.resize_fill_color || "#FFFFFF";
+			this.resize_flatten_rgb = s.resize_flatten_rgb !== undefined ? !!s.resize_flatten_rgb : true;
+		},
+		_save_canvas_defaults() {
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Image Processing Settings",
+					name: "Image Processing Settings",
+					fieldname: {
+						resize_enabled: this.resize_enabled ? 1 : 0,
+						resize_aspect: this.resize_aspect,
+						resize_mode: this.resize_mode,
+						resize_fill_color: this.resize_fill_color,
+						resize_flatten_rgb: this.resize_flatten_rgb ? 1 : 0,
+					},
+				},
+				callback: () => {
+					frappe.show_alert({ message: __("Canvas settings saved as default"), indicator: "green" });
 				},
 			});
 		},
@@ -1979,15 +2084,289 @@ export default {
 </script>
 
 <style scoped>
+/* ── Two-column grid layout (new 2026-04) ──
+   Desktop: cropper on the left, tabbed param panel on the right.
+   Mobile: stacked (media query below flips to single-column). */
+.cropper-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+	gap: 16px;
+	align-items: stretch;
+	min-height: 0;
+}
+.cropper-left-col {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+}
+.cropper-right-col {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-width: 0;
+	min-height: 0;
+}
+
+/* ── Top toolbar (drag mode + crop ratio, above the cropper) ── */
+.cropper-top-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+	padding: 8px 12px;
+	margin-bottom: 8px;
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	background: var(--fg-color, white);
+	align-items: center;
+}
+.cropper-toolbar-group {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+.cropper-toolbar-label {
+	font-size: 12px;
+	color: #606266;
+	font-weight: 500;
+}
+
 img {
 	display: block;
 	max-width: 100%;
-	/* Cap the image so the whole cropper dialog (image + param cards + action
-	   bar + modal chrome) fits inside the viewport. The 420px budget leaves
-	   room for: modal header/footer (~120px), section cards (~220px when both
-	   open), action bar (~50px), and small margins. Fallback 600px keeps
-	   legacy behavior on very tall viewports where calc() overshoots. */
-	max-height: min(600px, calc(100vh - 420px));
+	/* No longer need the 420px budget — the grid flex lets the cropper
+	   grow to fill available vertical space. Just cap for legacy
+	   single-column case. */
+	max-height: min(600px, calc(100vh - 320px));
+}
+
+/* ── Preview bar below cropper ── */
+.cropper-preview-bar {
+	display: flex;
+	gap: 16px;
+	padding: 10px 14px;
+	margin-top: 10px;
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	background: var(--fg-color, white);
+	align-items: center;
+}
+.cropper-preview-thumb {
+	flex-shrink: 0;
+}
+.cropper-preview-thumb canvas {
+	width: 72px;
+	height: 72px;
+	border: 1px solid var(--border-color);
+	background: #ffffff;
+	background-image:
+		linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
+		linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
+		linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+	background-size: 12px 12px;
+	background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+	border-radius: 4px;
+	display: block;
+}
+.cropper-preview-dims {
+	margin-top: 4px;
+	font-size: 10px;
+	color: #64748b;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.cropper-preview-body {
+	flex: 1;
+	min-width: 0;
+}
+.cropper-preview-title {
+	font-weight: 600;
+	font-size: 13px;
+	color: #303133;
+}
+.cropper-preview-hint {
+	margin-left: 6px;
+	font-weight: 400;
+	font-size: 11px;
+	color: #94a3b8;
+}
+.cropper-preview-chips {
+	margin-top: 6px;
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+.cropper-preview-chip {
+	font-size: 11px;
+	padding: 2px 10px;
+	border-radius: 11px;
+	background: #ecf5ff;
+	color: #3b82f6;
+	border: 1px solid #3b82f6;
+	font-weight: 600;
+}
+
+/* ── Right-side feature tabs ── */
+.cropper-feature-tabs {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+	gap: 6px;
+}
+.cropper-feature-tab {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 8px 6px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: var(--fg-color, white);
+	cursor: pointer;
+	font-size: 11px;
+	line-height: 1.2;
+	min-height: 50px;
+}
+.cropper-feature-tab:hover {
+	background: #f5faff;
+}
+.cropper-feature-tab.active {
+	border: 2px solid #3b82f6;
+	background: #ecf5ff;
+}
+.cropper-feature-tab-label {
+	font-weight: 600;
+	color: #303133;
+}
+.cropper-feature-tab.active .cropper-feature-tab-label {
+	color: #3b82f6;
+}
+.cropper-feature-tab-state {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 10px;
+	font-weight: 700;
+	text-transform: uppercase;
+}
+.cropper-feature-tab-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #cbd5e1;
+}
+.cropper-feature-tab-state.on {
+	color: #22c55e;
+}
+.cropper-feature-tab-state.on .cropper-feature-tab-dot {
+	background: #22c55e;
+}
+.cropper-feature-tab-state.off {
+	color: #94a3b8;
+}
+
+/* ── Right-side tab body ── */
+.cropper-tab-body {
+	flex: 1;
+	padding: 12px;
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	background: var(--fg-color, white);
+	overflow-y: auto;
+	min-height: 0;
+}
+.cropper-tab-pane {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+.cropper-tab-enable {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 10px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: #fafbfc;
+}
+.cropper-tab-enable-label {
+	font-size: 13px;
+	font-weight: 600;
+	color: #303133;
+}
+.toggle-pill-compact {
+	padding: 0;
+	border: none;
+	background: none;
+}
+
+/* Canvas tab specific */
+.canvas-field {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.canvas-sublabel {
+	font-size: 11px;
+	color: #606266;
+	font-weight: 500;
+}
+.canvas-segmented {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+.canvas-segmented .segmented-tab {
+	flex: 1 0 auto;
+	min-width: 48px;
+}
+.canvas-misc-row {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+
+/* Comments list header */
+.comments-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	font-weight: 600;
+	font-size: 13px;
+}
+
+/* Watermark slider row */
+.wm-slider-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+.wm-slider-row .wm-slider-label {
+	width: 80px;
+	font-size: 11px;
+	color: #606266;
+}
+.wm-slider-row .wm-slider {
+	flex: 1;
+}
+.wm-slider-row .wm-slider-value {
+	width: 40px;
+	font-size: 11px;
+	color: #303133;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+/* ── Mobile: stack left + right columns ── */
+@media (max-width: 900px) {
+	.cropper-grid {
+		grid-template-columns: 1fr;
+	}
+	.cropper-feature-tabs {
+		grid-template-columns: repeat(4, 1fr);
+	}
 }
 
 /* ── Unified Image Adjustments panel ──
