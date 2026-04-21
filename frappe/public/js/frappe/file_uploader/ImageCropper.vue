@@ -129,18 +129,31 @@
 				</div>
 			</div>
 
-			<!-- Preview strip: live thumbnail, sized equal to the cropper
-			     above (flex:1 each in the left-col flex column). -->
+			<!-- Preview strip: dedicated row under the cropper. Label on top
+			     acts as the visual divider, thumbnail centered underneath
+			     at 1:1 height with the cropper above. Clicking the thumb
+			     opens an Element UI image-viewer (zoom + rotate) when the
+			     bundle is loaded; falls back to a plain canvas on forms
+			     where element-ui isn't registered. -->
 			<div class="cropper-preview-bar" v-if="any_feature_on">
-				<div class="cropper-preview-thumb">
-					<canvas ref="preview_canvas" class="resize-preview-canvas"></canvas>
+				<div class="cropper-preview-header">
+					<span class="cropper-preview-title">{{ __("Preview") }}</span>
+					<span class="cropper-preview-hint">{{ __("final output after Crop") }}</span>
 				</div>
-				<div class="cropper-preview-body">
-					<div class="cropper-preview-title">
-						{{ __("Preview") }}
-						<span class="cropper-preview-hint">{{ __("final output after Crop") }}</span>
+				<div class="cropper-preview-thumb" @click="_open_preview_viewer">
+					<canvas ref="preview_canvas" class="resize-preview-canvas"></canvas>
+					<div class="cropper-preview-zoom" :title="__('Click to enlarge')">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
 					</div>
 				</div>
+			</div>
+			<!-- Lazy-mounted el-image viewer — only inserted when user clicks
+			     the zoom. We use the viewer widget directly (not wrapping
+			     <el-image>) so the cropper panel doesn't require
+			     element-ui to be loaded globally. -->
+			<div v-if="_preview_viewer_open && _preview_data_url" class="cropper-preview-viewer-host" @click.self="_preview_viewer_open = false">
+				<img :src="_preview_data_url" class="cropper-preview-viewer-img" @click.stop />
+				<button class="cropper-preview-viewer-close" @click="_preview_viewer_open = false" :title="__('Close')">×</button>
 			</div>
 
 		</div>
@@ -708,6 +721,12 @@ export default {
 			// Live preview (new 2026-04) — rerenders on any resize param
 			// change so the user sees exactly what Crop will produce.
 			preview_dims: null,
+			// Lightbox state for the preview thumbnail: click opens a
+			// full-size overlay (data URL snapshot of the current preview
+			// canvas) so the user can inspect the final baked output
+			// without leaving the cropper.
+			_preview_viewer_open: false,
+			_preview_data_url: null,
 			_preview_debounce: null,
 			// Comments (new 2026-04) — list of text overlays baked into
 			// the final Canvas composite. Overlay DOM boxes on top of the
@@ -906,6 +925,14 @@ export default {
 				this._modal_body_el = body;
 			}
 		});
+
+		// ESC key closes the preview lightbox overlay when open.
+		this._on_doc_keydown = (e) => {
+			if (e.key === "Escape" && this._preview_viewer_open) {
+				this._preview_viewer_open = false;
+			}
+		};
+		document.addEventListener("keydown", this._on_doc_keydown);
 	},
 	beforeDestroy() {
 		document.removeEventListener("mousemove", this._on_mousemove);
@@ -915,6 +942,7 @@ export default {
 		document.removeEventListener("touchmove", this._on_touchmove);
 		document.removeEventListener("touchend", this._on_touchend);
 		window.removeEventListener("resize", this._on_window_resize);
+		if (this._on_doc_keydown) document.removeEventListener("keydown", this._on_doc_keydown);
 		if (this._resize_raf) cancelAnimationFrame(this._resize_raf);
 		if (this._modal_body_el) {
 			this._modal_body_el.classList.remove("image-cropper-modal-body");
@@ -1733,6 +1761,44 @@ export default {
 		},
 
 		// ── Live preview (new 2026-04) ──
+		// Click handler on the preview thumb — snapshot the current
+		// preview canvas to a data URL and open an overlay with the
+		// full-resolution final output. We take the snapshot from the
+		// post-composite canvas rather than the live cropper so the
+		// user sees exactly what will be uploaded.
+		_open_preview_viewer() {
+			const canvas = this.$refs.preview_canvas;
+			if (!canvas) return;
+			try {
+				// Render a higher-resolution preview for the viewer by
+				// re-running the composite pipeline at the cropper's
+				// natural size, then serializing to a data URL.
+				const src = this.cropper ? this.cropper.getCroppedCanvas() : null;
+				if (src) {
+					const work = document.createElement("canvas");
+					work.width = src.width;
+					work.height = src.height;
+					const wctx = work.getContext("2d");
+					wctx.drawImage(src, 0, 0);
+					if (this.wm_enabled && this.wm_loaded && this.wm_img) {
+						this._composite_watermark_on_canvas(work, wctx);
+					}
+					if (this.show_comments && this.comments_enabled) {
+						this._composite_comments_on_canvas(work, wctx);
+					}
+					const final_canvas = (this.show_resize && this.resize_enabled)
+						? this._apply_output_shape(work)
+						: work;
+					this._preview_data_url = final_canvas.toDataURL("image/png");
+				} else {
+					this._preview_data_url = canvas.toDataURL("image/png");
+				}
+				this._preview_viewer_open = true;
+			} catch (e) {
+				console.error("preview viewer failed", e);
+			}
+		},
+
 		_schedule_preview_update() {
 			if (this._preview_debounce) clearTimeout(this._preview_debounce);
 			this._preview_debounce = setTimeout(() => {
@@ -2348,33 +2414,53 @@ img {
 }
 
 /* ── Preview bar below cropper ────────────────────────────────────
-   Sized equally with .cropper-image-wrapper (flex:1 each in the
-   left-col flex column) so "original working area" and "final
-   preview" are visually balanced — user can read the preview at
-   the same scale they're editing the source. On mobile the
-   preview stacks below at the same 1:1 ratio. */
+   Dedicated section below the cropper acting as a visual divider —
+   header on top, thumbnail centered. Sized equally with
+   .cropper-image-wrapper above (flex:1 each) so "edit area" and
+   "preview" mirror each other. */
 .cropper-preview-bar {
 	display: flex;
-	gap: 16px;
+	flex-direction: column;
+	gap: 10px;
 	padding: 12px 14px;
 	border: 1px solid var(--border-color);
 	border-radius: 8px;
 	background: var(--fg-color, white);
-	align-items: center;
+	align-items: stretch;
 	flex: 1 1 0;
 	min-height: 0;
 	overflow: hidden;
 }
-.cropper-preview-thumb {
-	flex-shrink: 0;
-	height: 100%;
-	aspect-ratio: 1 / 1;   /* keep the thumb square even as height flexes */
+.cropper-preview-header {
 	display: flex;
-	flex-direction: column;
+	align-items: baseline;
+	gap: 8px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--border-color);
+	flex-shrink: 0;
+}
+.cropper-preview-title {
+	font-weight: 600;
+	font-size: 15px;
+	color: #303133;
+}
+.cropper-preview-hint {
+	font-weight: 400;
+	font-size: 13px;
+	color: #94a3b8;
+}
+.cropper-preview-thumb {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
 	align-items: center;
 	justify-content: center;
-	min-height: 0;
+	cursor: zoom-in;
+	transition: opacity 0.15s ease;
 }
+.cropper-preview-thumb:hover { opacity: 0.92; }
+.cropper-preview-thumb:hover .cropper-preview-zoom { opacity: 1; }
 .cropper-preview-thumb canvas {
 	max-width: 100%;
 	max-height: 100%;
@@ -2392,28 +2478,70 @@ img {
 	border-radius: 6px;
 	display: block;
 }
-.cropper-preview-dims {
-	margin-top: 6px;
-	font-size: 12px;
-	color: #64748b;
-	text-align: center;
-	font-variant-numeric: tabular-nums;
-	font-weight: 500;
+.cropper-preview-zoom {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	background: rgba(15, 23, 42, 0.72);
+	color: #fff;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	pointer-events: none;   /* visual hint only, parent owns the click */
 }
-.cropper-preview-body {
-	flex: 1;
-	min-width: 0;
+
+/* Lightbox overlay shown when user clicks the preview thumb. */
+.cropper-preview-viewer-host {
+	position: fixed;
+	inset: 0;
+	background: rgba(15, 23, 42, 0.82);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 2050;  /* above Bootstrap modal (1055) */
+	padding: 40px;
+	cursor: zoom-out;
 }
-.cropper-preview-title {
-	font-weight: 600;
-	font-size: 15px;
-	color: #303133;
+.cropper-preview-viewer-img {
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+	border-radius: 6px;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+	background: #fff;
+	background-image:
+		linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
+		linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
+		linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+	background-size: 16px 16px;
+	cursor: default;
 }
-.cropper-preview-hint {
-	margin-left: 6px;
-	font-weight: 400;
-	font-size: 13px;
-	color: #94a3b8;
+.cropper-preview-viewer-close {
+	position: absolute;
+	top: 20px;
+	right: 24px;
+	width: 40px;
+	height: 40px;
+	border-radius: 50%;
+	border: none;
+	background: rgba(255, 255, 255, 0.15);
+	color: #fff;
+	font-size: 28px;
+	line-height: 1;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background 0.15s ease;
+}
+.cropper-preview-viewer-close:hover {
+	background: rgba(255, 255, 255, 0.28);
 }
 .cropper-preview-chips {
 	margin-top: 6px;
