@@ -204,6 +204,8 @@ export default class FileUploader {
 		});
 
 		this.wrapper = this.dialog.body;
+		// Tag the dialog so CSS can size it larger for the image features.
+		this.dialog.$wrapper.addClass("file-uploader-dialog");
 		this.dialog.show();
 		this.dialog.$wrapper.on("hidden.bs.modal", function () {
 			$(this).data("bs.modal", null);

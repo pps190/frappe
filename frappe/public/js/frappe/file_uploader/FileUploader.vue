@@ -1004,4 +1004,35 @@ export default {
 	font-weight: 500;
 	border-radius: 8px;
 }
+
+/* The File Uploader dialog now hosts ImageCropper + its side panel; the default
+   modal-dialog (typically 600px wide) is too small. Expand up to 90vw / 90vh
+   with a hard ceiling of 1600 × 900 so it doesn't dominate 4K displays. */
+.file-uploader-dialog .modal-dialog {
+	max-width: min(90vw, 1600px);
+	width: min(90vw, 1600px);
+	margin: 1.75rem auto;
+}
+.file-uploader-dialog .modal-content {
+	max-height: min(90vh, 900px);
+	min-height: min(90vh, 900px);
+	display: flex;
+	flex-direction: column;
+}
+.file-uploader-dialog .modal-body {
+	flex: 1 1 auto;
+	overflow-y: auto;
+}
+@media (max-width: 768px) {
+	.file-uploader-dialog .modal-dialog {
+		max-width: 100vw;
+		width: 100vw;
+		margin: 0;
+	}
+	.file-uploader-dialog .modal-content {
+		min-height: 100vh;
+		max-height: 100vh;
+		border-radius: 0;
+	}
+}
 </style>

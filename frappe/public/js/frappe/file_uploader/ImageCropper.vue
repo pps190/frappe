@@ -109,6 +109,12 @@
 						<div class="comment-overlay-text" :style="comment_text_style(box)">
 							{{ box.text || __('(empty)') }}
 						</div>
+						<div
+							v-if="selected_comment_idx === i && interaction_mode === 'comment'"
+							class="comment-rotate-handle"
+							:title="__('Rotate')"
+							@mousedown.stop="on_comment_rotate_mousedown($event, i)"
+						>↻</div>
 					</div>
 				</div>
 				<div v-if="bg_processing" class="cropper-loading-overlay">
@@ -522,6 +528,14 @@
 										min="5" max="100" step="1"
 										:value="Math.round(box.width_pct)"
 										@input="_update_comment(i, 'width_pct', parseFloat($event.target.value) || 5)"
+									/>
+								</label>
+								<label class="comment-control">
+									<span>{{ __("Rotate °") }}</span>
+									<input type="number" class="wm-input comment-num-input"
+										min="-180" max="180" step="5"
+										:value="Math.round(box.rotation_deg || 0)"
+										@input="_update_comment(i, 'rotation_deg', parseFloat($event.target.value) || 0)"
 									/>
 								</label>
 							</div>
@@ -1299,14 +1313,19 @@ export default {
 			// Percentage-based position + size. Absolute inside the
 			// .comment-overlay container which is already sized to match
 			// the cropper image display rect.
+			// Rotation uses CSS transform around center to match the
+			// server-side PIL rotation (which also rotates around center).
 			const leftPct = (box.position_x_pct || 50) - (box.width_pct || 40) / 2;
 			const topPct = (box.position_y_pct || 50) - (box.height_pct || 10) / 2;
+			const rot = box.rotation_deg || 0;
 			return {
 				position: "absolute",
 				left: leftPct + "%",
 				top: topPct + "%",
 				width: (box.width_pct || 40) + "%",
 				height: (box.height_pct || 10) + "%",
+				transform: rot ? `rotate(${rot}deg)` : null,
+				transformOrigin: "50% 50%",
 			};
 		},
 		comment_text_style(box) {
@@ -1344,6 +1363,7 @@ export default {
 			this.comment_dragging_idx = i;
 			const box = this.comment_boxes[i];
 			this._comment_drag_start = {
+				mode: "move",
 				clientX: e.clientX,
 				clientY: e.clientY,
 				origXPct: box.position_x_pct,
@@ -1358,24 +1378,61 @@ export default {
 			this.comment_dragging_idx = i;
 			const box = this.comment_boxes[i];
 			this._comment_drag_start = {
+				mode: "move",
 				clientX: t.clientX,
 				clientY: t.clientY,
 				origXPct: box.position_x_pct,
 				origYPct: box.position_y_pct,
 			};
 		},
+		on_comment_rotate_mousedown(e, i) {
+			if (this.interaction_mode !== "comment") return;
+			const cd = this._canvas_data;
+			const wrapper = this.$refs.wrapper;
+			if (!cd || !wrapper) return;
+			this.selected_comment_idx = i;
+			this.comment_dragging_idx = i;
+			const box = this.comment_boxes[i];
+			// Box center in page pixels: wrapper origin + canvas offset + box center %
+			const wrapperRect = wrapper.getBoundingClientRect();
+			const cx = wrapperRect.left + cd.left + (box.position_x_pct / 100) * cd.width;
+			const cy = wrapperRect.top + cd.top + (box.position_y_pct / 100) * cd.height;
+			const startAngle = Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI;
+			this._comment_drag_start = {
+				mode: "rotate",
+				cx,
+				cy,
+				startAngle,
+				origRot: box.rotation_deg || 0,
+			};
+			e.preventDefault();
+		},
 		_on_comment_mousemove(e) {
 			if (this.comment_dragging_idx < 0 || !this._comment_drag_start) return;
+			const start = this._comment_drag_start;
+			const i = this.comment_dragging_idx;
+			const box = this.comment_boxes[i];
+			if (!box) return;
+
+			if (start.mode === "rotate") {
+				const currentAngle = Math.atan2(
+					e.clientY - start.cy,
+					e.clientX - start.cx
+				) * 180 / Math.PI;
+				let rot = start.origRot + (currentAngle - start.startAngle);
+				while (rot > 180) rot -= 360;
+				while (rot < -180) rot += 360;
+				if (e.shiftKey) rot = Math.round(rot / 15) * 15;
+				this.$set(this.comment_boxes, i, { ...box, rotation_deg: rot });
+				return;
+			}
+
 			const cd = this._canvas_data;
 			if (!cd) return;
-			const start = this._comment_drag_start;
 			const dx = e.clientX - start.clientX;
 			const dy = e.clientY - start.clientY;
 			const dxPct = (dx / cd.width) * 100;
 			const dyPct = (dy / cd.height) * 100;
-			const i = this.comment_dragging_idx;
-			const box = this.comment_boxes[i];
-			if (!box) return;
 			const newX = Math.max(0, Math.min(100, start.origXPct + dxPct));
 			const newY = Math.max(0, Math.min(100, start.origYPct + dyPct));
 			this.$set(this.comment_boxes, i, {
@@ -1388,6 +1445,7 @@ export default {
 			if (this.comment_dragging_idx >= 0) {
 				this.comment_dragging_idx = -1;
 				this._comment_drag_start = null;
+				this._schedule_preview_update();
 			}
 		},
 
@@ -1530,6 +1588,7 @@ export default {
 				const cx = w * (box.position_x_pct || 50) / 100;
 				const cy = h * (box.position_y_pct || 50) / 100;
 				const box_w_px = w * (box.width_pct || 40) / 100;
+				const rotation_deg = box.rotation_deg || 0;
 
 				// Simple greedy word-wrap (same intent as _wrap_to_width on server)
 				const lines = this._wrap_text_to_width(
@@ -1537,6 +1596,18 @@ export default {
 				);
 				const line_h = font_size_px * 1.2;
 				const total_h = lines.length * line_h;
+
+				// Rotate around box center (cx, cy). Matches CSS transform-origin 50% 50%
+				// on the overlay box and PIL's rotate(-angle, expand=True) + alpha_composite
+				// which keeps text centered on (cx, cy) after rotation.
+				const needs_rotate = Math.abs(rotation_deg) > 0.001;
+				if (needs_rotate) {
+					ctx.save();
+					ctx.translate(cx, cy);
+					ctx.rotate((rotation_deg * Math.PI) / 180);
+					ctx.translate(-cx, -cy);
+				}
+
 				let y_cursor = cy - total_h / 2 + line_h * 0.75;
 				for (const line of lines) {
 					const line_w = ctx.measureText(line).width;
@@ -1546,6 +1617,10 @@ export default {
 					else x = cx - line_w / 2;
 					ctx.fillText(line, x, y_cursor);
 					y_cursor += line_h;
+				}
+
+				if (needs_rotate) {
+					ctx.restore();
 				}
 			}
 		},
@@ -3039,6 +3114,29 @@ img {
 	white-space: pre-wrap;
 	overflow: hidden;
 	text-overflow: clip;
+}
+.comment-rotate-handle {
+	position: absolute;
+	top: -22px;
+	left: 50%;
+	margin-left: -9px;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: #10b981;
+	color: #fff;
+	font-size: 11px;
+	line-height: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: grab;
+	user-select: none;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+	z-index: 5;
+}
+.comment-rotate-handle:active {
+	cursor: grabbing;
 }
 
 /* Enhanced comment entry controls */
