@@ -65,14 +65,36 @@
 			v-if="(show_remove_bg && bg_removed && nobg_bbox) || (show_watermark && wm_enabled) || (show_resize && resize_enabled)"
 			class="adjustments-panel"
 		>
-			<!-- Output Shape (FIRST in list per UX spec) — aspect, mode, fill,
-			     flatten. Only shown when the Output Shape toggle pill is on. -->
+			<!-- Live preview of the final output (what Crop will produce).
+			     Re-renders on any param change via the preview_tick
+			     reactive dependency so the user sees the resize +
+			     watermark + flatten result before committing. -->
+			<div
+				v-if="show_resize && resize_enabled"
+				class="adjustments-row adjustments-row-preview"
+			>
+				<label class="adjustments-field-label">
+					{{ __("Preview") }}
+					<span class="adjustments-field-hint">
+						{{ __("Final output after Crop") }}
+					</span>
+				</label>
+				<div class="resize-preview-wrap">
+					<canvas ref="preview_canvas" class="resize-preview-canvas"></canvas>
+					<div v-if="preview_dims" class="resize-preview-dims">
+						{{ preview_dims.w }}×{{ preview_dims.h }}
+					</div>
+				</div>
+			</div>
+
+			<!-- Resize (FIRST in list per UX spec) — aspect, mode, fill,
+			     flatten. Only shown when the Resize toggle pill is on. -->
 			<div
 				v-if="show_resize && resize_enabled"
 				class="adjustments-row adjustments-row-resize"
 			>
 				<label class="adjustments-field-label">
-					{{ __("Output Shape") }}
+					{{ __("Resize") }}
 					<span class="adjustments-field-hint">
 						{{ __("Aspect normalization baked on Crop. Never upscales.") }}
 					</span>
@@ -313,7 +335,7 @@
 					:title="__('Normalize output aspect ({0}, {1})', [resize_aspect, resize_mode])"
 				>
 					<span class="toggle-pill-label">
-						{{ __("Output Shape") }}
+						{{ __("Resize") }}
 						<span v-if="resize_enabled" class="toggle-pill-sublabel">
 							{{ resize_aspect }}
 						</span>
@@ -405,6 +427,10 @@ export default {
 			max_file_size_kb: 2048,
 			aspect_ratio_options: ["1:1", "4:3", "16:9", "3:2", "2:3", "Free"],
 			resize_mode_options: ["Contain", "Cover", "Stretch"],
+			// Live preview (new 2026-04) — rerenders on any resize param
+			// change so the user sees exactly what Crop will produce.
+			preview_dims: null,
+			_preview_debounce: null,
 		};
 	},
 	watch: {
@@ -413,6 +439,27 @@ export default {
 				this.cropper.setAspectRatio(value);
 			}
 		},
+		// Any change to resize params → rerender the preview. Debounced
+		// so slider drags don't hammer the off-screen canvas composite.
+		resize_enabled() { this._schedule_preview_update(); },
+		resize_aspect() { this._schedule_preview_update(); },
+		resize_mode() { this._schedule_preview_update(); },
+		resize_fill_color() { this._schedule_preview_update(); },
+		resize_flatten_rgb() { this._schedule_preview_update(); },
+		// Watermark + padding also affect final output — refresh preview
+		// on those too so the user sees the composite result.
+		wm_enabled() { this._schedule_preview_update(); },
+		wm_opacity() { this._schedule_preview_update(); },
+		wm_size() { this._schedule_preview_update(); },
+		wm_pos_x() { this._schedule_preview_update(); },
+		wm_pos_y() { this._schedule_preview_update(); },
+		wm_mode() { this._schedule_preview_update(); },
+		wm_tile_size() { this._schedule_preview_update(); },
+		wm_tile_opacity() { this._schedule_preview_update(); },
+		wm_tile_rotation() { this._schedule_preview_update(); },
+		wm_tile_spacing() { this._schedule_preview_update(); },
+		local_padding_pct() { this._schedule_preview_update(); },
+		bg_removed() { this._schedule_preview_update(); },
 	},
 	mounted() {
 		// Remove BG: cached files + bbox metadata (Phase 1)
@@ -579,11 +626,16 @@ export default {
 						if (this.wm_enabled && this.wm_loaded) {
 							this.$nextTick(() => this.wm_resize_canvas());
 						}
+						// Initial preview render once cropper is ready
+						this.$nextTick(() => this._schedule_preview_update());
 					},
 					crop: () => {
 						if (this.wm_enabled && this.wm_loaded) {
 							this.$nextTick(() => this.wm_draw());
 						}
+						// Preview follows the crop box — user dragging
+						// the frame updates the preview live (debounced).
+						this._schedule_preview_update();
 					},
 				});
 			};
@@ -856,6 +908,116 @@ export default {
 			ctx.fillRect(0, 0, w, h);
 			ctx.drawImage(src_canvas, 0, 0);
 			return out;
+		},
+
+		// ── Live preview (new 2026-04) ──
+		_schedule_preview_update() {
+			if (this._preview_debounce) clearTimeout(this._preview_debounce);
+			this._preview_debounce = setTimeout(() => {
+				this._preview_debounce = null;
+				this._render_preview();
+			}, 120);
+		},
+
+		_render_preview() {
+			const preview_canvas = this.$refs.preview_canvas;
+			if (!preview_canvas) return;
+			if (!this.cropper) return;
+
+			// Run the same pipeline crop_image would, but draw to a
+			// 200×200 display canvas. Reuses _apply_output_shape so
+			// preview + actual output match exactly.
+			let src;
+			try {
+				src = this.cropper.getCroppedCanvas();
+			} catch (e) {
+				return;
+			}
+			if (!src) return;
+
+			// Apply watermark to a working copy (off-screen)
+			const work = document.createElement("canvas");
+			work.width = src.width;
+			work.height = src.height;
+			const wctx = work.getContext("2d");
+			wctx.drawImage(src, 0, 0);
+			if (this.wm_enabled && this.wm_loaded && this.wm_img) {
+				this._composite_watermark_on_canvas(work, wctx);
+			}
+
+			// Apply Resize (same helper used on final crop)
+			const final_canvas = (this.show_resize && this.resize_enabled)
+				? this._apply_output_shape(work)
+				: work;
+
+			// Compute display box: letterbox into 200×200 preserving aspect
+			const MAX = 200;
+			const ratio = final_canvas.width / final_canvas.height;
+			let disp_w, disp_h;
+			if (ratio >= 1) {
+				disp_w = MAX;
+				disp_h = Math.round(MAX / ratio);
+			} else {
+				disp_h = MAX;
+				disp_w = Math.round(MAX * ratio);
+			}
+			preview_canvas.width = disp_w;
+			preview_canvas.height = disp_h;
+			const pctx = preview_canvas.getContext("2d");
+			pctx.clearRect(0, 0, disp_w, disp_h);
+			pctx.drawImage(final_canvas, 0, 0, disp_w, disp_h);
+
+			this.preview_dims = { w: final_canvas.width, h: final_canvas.height };
+		},
+
+		// Extract the watermark composite from crop_image() so _render_preview
+		// can reuse it without duplicating the pixel math.
+		_composite_watermark_on_canvas(canvas, ctx) {
+			const image_data = this.cropper.getImageData();
+			const crop_data = this.cropper.getData();
+			const cw = canvas.width;
+			const ch = canvas.height;
+			const full_w = image_data.naturalWidth;
+			const full_h = image_data.naturalHeight;
+			const crop_x = crop_data.x;
+			const crop_y = crop_data.y;
+			const crop_w = crop_data.width;
+			const crop_h = crop_data.height;
+			const scale_x = cw / crop_w;
+			const scale_y = ch / crop_h;
+
+			if (this.wm_mode === "Tiled") {
+				const tile_w = (this.wm_tile_size / 100) * full_w * scale_x;
+				const tile_h = tile_w * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
+				const spacing_x = (this.wm_tile_spacing / 100) * full_w * scale_x;
+				const spacing_y = (this.wm_tile_spacing / 100) * full_h * scale_y;
+				const step_x = tile_w + spacing_x;
+				const step_y = tile_h + spacing_y;
+				const angle = (this.wm_tile_rotation * Math.PI) / 180;
+				ctx.save();
+				ctx.globalAlpha = this.wm_tile_opacity / 100;
+				ctx.translate(cw / 2, ch / 2);
+				ctx.rotate(angle);
+				const diag = Math.sqrt(cw * cw + ch * ch);
+				for (let y = -diag; y < diag; y += step_y) {
+					for (let x = -diag; x < diag; x += step_x) {
+						ctx.drawImage(this.wm_img, x, y, tile_w, tile_h);
+					}
+				}
+				ctx.restore();
+			} else {
+				const wm_center_x = (this.wm_pos_x / 100) * full_w;
+				const wm_center_y = (this.wm_pos_y / 100) * full_h;
+				const wm_w_full = (this.wm_size / 100) * full_w;
+				const wm_h_full = wm_w_full * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
+				const draw_x = (wm_center_x - wm_w_full / 2 - crop_x) * scale_x;
+				const draw_y = (wm_center_y - wm_h_full / 2 - crop_y) * scale_y;
+				const draw_w = wm_w_full * scale_x;
+				const draw_h = wm_h_full * scale_y;
+				ctx.globalAlpha = this.wm_opacity / 100;
+				ctx.drawImage(this.wm_img, draw_x, draw_y, draw_w, draw_h);
+				ctx.globalAlpha = 1.0;
+			}
 		},
 
 		// ── Remove BG ──
@@ -1753,6 +1915,48 @@ img {
 .segmented-tab.disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
+}
+
+/* Live preview canvas (new 2026-04) — shown at the top of the
+   adjustments panel whenever Resize is on, so the user can see
+   exactly what the final output will look like before clicking Crop. */
+.adjustments-row-preview {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.resize-preview-wrap {
+	position: relative;
+	display: inline-block;
+	padding: 8px;
+	background: #fafbfc;
+	border: 1px solid #e5edf8;
+	border-radius: 6px;
+	align-self: flex-start;
+}
+.resize-preview-canvas {
+	display: block;
+	background: #ffffff;
+	/* checkerboard so users know where transparency is */
+	background-image:
+		linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
+		linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
+		linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+	background-size: 16px 16px;
+	background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+	min-width: 60px;
+	min-height: 60px;
+	max-width: 200px;
+	max-height: 200px;
+	border: 1px solid #cbd5e1;
+}
+.resize-preview-dims {
+	margin-top: 6px;
+	font-size: 11px;
+	color: #64748b;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
 }
 </style>
 
