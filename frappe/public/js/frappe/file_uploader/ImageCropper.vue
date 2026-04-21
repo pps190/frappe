@@ -129,30 +129,16 @@
 				</div>
 			</div>
 
-			<!-- Preview strip: live thumbnail + chip summary of what's on -->
+			<!-- Preview strip: live thumbnail, sized equal to the cropper
+			     above (flex:1 each in the left-col flex column). -->
 			<div class="cropper-preview-bar" v-if="any_feature_on">
 				<div class="cropper-preview-thumb">
 					<canvas ref="preview_canvas" class="resize-preview-canvas"></canvas>
-					<div v-if="preview_dims" class="cropper-preview-dims">
-						{{ preview_dims.w }} × {{ preview_dims.h }} {{ preview_format_label }}
-					</div>
 				</div>
 				<div class="cropper-preview-body">
 					<div class="cropper-preview-title">
 						{{ __("Preview") }}
 						<span class="cropper-preview-hint">{{ __("final output after Crop") }}</span>
-					</div>
-					<div class="cropper-preview-chips">
-						<span v-if="show_remove_bg && bg_removed" class="cropper-preview-chip">{{ __("Remove BG") }}</span>
-						<span v-if="show_watermark && wm_enabled" class="cropper-preview-chip">
-							{{ __("Watermark") }} · {{ wm_mode === "Tiled" ? __("Tiled") : __("Corner") }}
-						</span>
-						<span v-if="show_comments && comments_enabled && comment_boxes.length" class="cropper-preview-chip">
-							{{ __("Comments") }} · {{ comment_boxes.length }}
-						</span>
-						<span v-if="show_resize && resize_enabled" class="cropper-preview-chip">
-							{{ __("Canvas") }} · {{ resize_aspect }}
-						</span>
 					</div>
 				</div>
 			</div>
@@ -888,6 +874,9 @@ export default {
 				if (this.wm_enabled && this.wm_loaded) {
 					this.wm_resize_canvas();
 				}
+				// Preview thumb's container changes size with the modal,
+				// so re-render the preview at the new resolution.
+				this._schedule_preview_update();
 			});
 		};
 		window.addEventListener("resize", this._on_window_resize);
@@ -1788,9 +1777,16 @@ export default {
 				? this._apply_output_shape(work)
 				: work;
 
-			// Compute display box: letterbox into 280×280 preserving aspect
-			// (matches the 140px CSS-displayed canvas at 2× device pixel ratio).
-			const MAX = 280;
+			// Compute display box from the preview thumb's actual rendered
+			// size (the thumb is sized by CSS flex:1 matching the cropper
+			// height, so the preview scales with the modal height). Fall
+			// back to 280 on mount before layout has settled.
+			const thumb = preview_canvas.parentElement;
+			const maxAvail = thumb
+				? Math.max(120, Math.min(thumb.clientWidth || 280, thumb.clientHeight || 280))
+				: 280;
+			const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+			const MAX = Math.round(maxAvail * dpr);
 			const ratio = final_canvas.width / final_canvas.height;
 			let disp_w, disp_h;
 			if (ratio >= 1) {
@@ -1802,6 +1798,9 @@ export default {
 			}
 			preview_canvas.width = disp_w;
 			preview_canvas.height = disp_h;
+			// CSS size (what the user sees) is disp_* / dpr.
+			preview_canvas.style.width = Math.round(disp_w / dpr) + "px";
+			preview_canvas.style.height = Math.round(disp_h / dpr) + "px";
 			const pctx = preview_canvas.getContext("2d");
 			pctx.clearRect(0, 0, disp_w, disp_h);
 			pctx.drawImage(final_canvas, 0, 0, disp_w, disp_h);
@@ -2304,6 +2303,7 @@ export default {
 	flex-direction: column;
 	min-width: 0;
 	min-height: 0;
+	gap: 10px;
 }
 .cropper-right-col {
 	display: flex;
@@ -2347,24 +2347,39 @@ img {
 	max-height: min(600px, calc(100vh - 320px));
 }
 
-/* ── Preview bar below cropper ── */
+/* ── Preview bar below cropper ────────────────────────────────────
+   Sized equally with .cropper-image-wrapper (flex:1 each in the
+   left-col flex column) so "original working area" and "final
+   preview" are visually balanced — user can read the preview at
+   the same scale they're editing the source. On mobile the
+   preview stacks below at the same 1:1 ratio. */
 .cropper-preview-bar {
 	display: flex;
 	gap: 16px;
 	padding: 12px 14px;
-	margin-top: 10px;
 	border: 1px solid var(--border-color);
 	border-radius: 8px;
 	background: var(--fg-color, white);
 	align-items: center;
-	flex-shrink: 0;
+	flex: 1 1 0;
+	min-height: 0;
+	overflow: hidden;
 }
 .cropper-preview-thumb {
 	flex-shrink: 0;
+	height: 100%;
+	aspect-ratio: 1 / 1;   /* keep the thumb square even as height flexes */
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	min-height: 0;
 }
 .cropper-preview-thumb canvas {
-	width: 140px;
-	height: 140px;
+	max-width: 100%;
+	max-height: 100%;
+	width: auto;
+	height: auto;
 	border: 1px solid var(--border-color);
 	background: #ffffff;
 	background-image:
@@ -2598,10 +2613,32 @@ img {
 	font-weight: 500;
 }
 
-/* ── Mobile: stack left + right columns ── */
+/* ── Mobile: stack left + right columns ──
+   Grid collapses to one column and rows auto-stretch. The cropper
+   wrapper and preview bar keep the 1:1 flex ratio inside left-col,
+   and the right panel stacks below at its natural height. The
+   whole page is vertically scrollable so on phones the user sees
+   cropper → preview → params → Crop button by scrolling. */
 @media (max-width: 900px) {
 	.cropper-grid {
 		grid-template-columns: 1fr;
+		grid-template-rows: auto auto auto;
+		height: auto;
+	}
+	.cropper-left-col {
+		/* On mobile, cropper + preview each take 40vh so both are visible
+		   at once without forcing a huge viewport. Together with the
+		   right-col and action bar they fit a normal phone viewport. */
+		min-height: 80vh;
+	}
+	.cropper-image-wrapper,
+	.cropper-preview-bar {
+		flex: 1 1 40vh;
+		min-height: 40vh;
+	}
+	.cropper-right-col {
+		max-height: none;
+		overflow: visible;
 	}
 	.cropper-feature-tabs {
 		grid-template-columns: repeat(4, 1fr);
@@ -2612,6 +2649,17 @@ img {
 	.wm-slider-row .wm-slider-label { width: 82px; font-size: 13px; }
 	.wm-slider-row .wm-slider-value { width: 44px; font-size: 12px; }
 	.segmented-tab { padding: 7px 12px; font-size: 13px; }
+	.cropper-preview-thumb canvas { max-width: 100%; max-height: 100%; }
+}
+@media (max-width: 480px) {
+	/* Very small phones — shrink each row further so all 3 sections
+	   still fit in a single swipe. */
+	.cropper-left-col { min-height: 72vh; }
+	.cropper-image-wrapper,
+	.cropper-preview-bar {
+		flex: 1 1 36vh;
+		min-height: 36vh;
+	}
 }
 
 /* ── Unified Image Adjustments panel ──
@@ -2738,9 +2786,8 @@ img {
 
 .cropper-image-wrapper {
 	position: relative;
-	flex: 1 1 auto;
+	flex: 1 1 0;   /* equal share with .cropper-preview-bar below (flex:1 each = 1:1) */
 	min-height: 0;
-	max-height: 60vh;   /* leave room for preview + bottom action bar */
 	overflow: hidden;
 }
 .cropper-image-wrapper img {
