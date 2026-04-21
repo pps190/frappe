@@ -226,6 +226,9 @@
 			:wm_default_enabled="wm_enabled"
 			:show_resize="show_resize"
 			:resize_settings="resize_settings"
+			:show_comments="show_comments"
+			:comment_defaults="comment_defaults"
+			:comment_presets="comment_presets"
 			@toggle_image_cropper="toggle_image_cropper(-1)"
 			@upload_after_crop="trigger_upload = true"
 			@remove_bg_changed="remove_bg_checked = $event"
@@ -315,12 +318,25 @@ export default {
 		watermark_settings: {
 			default: null,
 		},
-		// Output Shape (new 2026-04) — aspect normalization applied at
+		// Resize (new 2026-04) — aspect normalization applied at
 		// Crop time. Mirror of Image Processing Settings' resize_* fields.
 		show_resize: {
 			default: false,
 		},
 		resize_settings: {
+			default: null,
+		},
+		// Comments (new 2026-04) — show the text-overlay list editor in
+		// the Cropper. comment_defaults = default style for new boxes;
+		// comment_presets = quick-insert library from Image Processing
+		// Settings.
+		show_comments: {
+			default: false,
+		},
+		comment_defaults: {
+			default: null,
+		},
+		comment_presets: {
 			default: null,
 		},
 	},

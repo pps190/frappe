@@ -62,7 +62,7 @@
 		     Watermark) live in the sticky dialog footer; this panel only hosts
 		     the parameters for whichever features are currently on. -->
 		<div
-			v-if="(show_remove_bg && bg_removed && nobg_bbox) || (show_watermark && wm_enabled) || (show_resize && resize_enabled)"
+			v-if="(show_remove_bg && bg_removed && nobg_bbox) || (show_watermark && wm_enabled) || (show_resize && resize_enabled) || (show_comments && comments_enabled)"
 			class="adjustments-panel"
 		>
 			<!-- Live preview of the final output (what Crop will produce).
@@ -137,6 +137,112 @@
 						<input type="checkbox" v-model="resize_flatten_rgb" />
 						<span>{{ __("Flatten RGB") }}</span>
 					</label>
+				</div>
+			</div>
+
+			<!-- Comments (new 2026-04) — simple list editor for single-item
+			     upload. Each entry is a text overlay with position/size/font
+			     controls. No drag UI here (use Item Image Batch for that).
+			     Baked into the Canvas composite on Crop click. -->
+			<div
+				v-if="show_comments && comments_enabled"
+				class="adjustments-row adjustments-row-comments"
+			>
+				<label class="adjustments-field-label">
+					{{ __("Comments") }}
+					<span class="adjustments-field-hint">
+						{{ __("Text baked into the image on Crop.") }}
+					</span>
+				</label>
+
+				<div v-if="comment_boxes.length === 0" class="comments-empty-hint">
+					{{ __("No comments yet.") }}
+				</div>
+
+				<div
+					v-for="(box, i) in comment_boxes"
+					:key="'box-' + i"
+					class="comment-entry"
+				>
+					<div class="comment-entry-header">
+						<span class="comment-entry-idx">#{{ i + 1 }}</span>
+						<textarea
+							class="comment-text-input"
+							:value="box.text"
+							:placeholder="__('Text…')"
+							rows="1"
+							@input="_update_comment(i, 'text', $event.target.value)"
+						></textarea>
+						<button
+							type="button"
+							class="btn btn-xs btn-danger comment-delete"
+							:title="__('Delete comment')"
+							@click="_delete_comment(i)"
+						>×</button>
+					</div>
+					<div class="comment-entry-controls">
+						<label class="comment-control">
+							<span>{{ __("Size %") }}</span>
+							<input type="number" class="wm-input comment-num-input"
+								min="1" max="50" step="0.5"
+								:value="box.font_size_pct"
+								@input="_update_comment(i, 'font_size_pct', parseFloat($event.target.value) || 5.0)"
+							/>
+						</label>
+						<label class="comment-control">
+							<span>X%</span>
+							<input type="number" class="wm-input comment-num-input"
+								min="0" max="100" step="1"
+								:value="Math.round(box.position_x_pct)"
+								@input="_update_comment(i, 'position_x_pct', parseFloat($event.target.value) || 0)"
+							/>
+						</label>
+						<label class="comment-control">
+							<span>Y%</span>
+							<input type="number" class="wm-input comment-num-input"
+								min="0" max="100" step="1"
+								:value="Math.round(box.position_y_pct)"
+								@input="_update_comment(i, 'position_y_pct', parseFloat($event.target.value) || 0)"
+							/>
+						</label>
+						<label class="comment-control">
+							<input type="checkbox"
+								:checked="box.font_weight === 'Bold'"
+								@change="_update_comment(i, 'font_weight', $event.target.checked ? 'Bold' : 'Normal')"
+							/>
+							<span>B</span>
+						</label>
+						<label class="comment-control">
+							<input type="color"
+								:value="box.color"
+								@input="_update_comment(i, 'color', $event.target.value)"
+							/>
+						</label>
+					</div>
+				</div>
+
+				<div class="comments-actions">
+					<button type="button" class="btn btn-xs btn-primary-light" @click="_add_comment()">
+						+ {{ __("Add Comment") }}
+					</button>
+					<button
+						v-if="comment_presets && comment_presets.length"
+						type="button"
+						class="btn btn-xs btn-default"
+						@click="_toggle_preset_menu()"
+					>
+						📋 {{ __("Presets") }}
+					</button>
+					<div v-if="preset_menu_open" class="comment-preset-menu">
+						<div
+							v-for="(p, pi) in comment_presets"
+							:key="'preset-' + pi"
+							class="comment-preset-item"
+							@click="_insert_preset(p)"
+						>
+							{{ p.text || __("(no text)") }}
+						</div>
+					</div>
 				</div>
 			</div>
 
@@ -346,6 +452,25 @@
 						</span>
 					</span>
 				</div>
+				<div
+					v-if="show_comments"
+					class="toggle-pill"
+					:class="{ active: comments_enabled }"
+					@click="comments_enabled = !comments_enabled"
+					:title="__('Add text comments baked into the image')"
+				>
+					<span class="toggle-pill-label">
+						{{ __("Comments") }}
+						<span v-if="comments_enabled && comment_boxes.length > 0" class="toggle-pill-sublabel">
+							{{ comment_boxes.length }}
+						</span>
+					</span>
+					<span class="toggle-pill-switch">
+						<span class="toggle-pill-track" :class="{ on: comments_enabled }">
+							<span class="toggle-pill-thumb"></span>
+						</span>
+					</span>
+				</div>
 			</div>
 			<div>
 				<button
@@ -371,8 +496,13 @@ export default {
 		"file", "fixed_aspect_ratio",
 		"show_remove_bg", "remove_bg_checked", "remove_bg_padding_pct",
 		"show_watermark", "watermark_settings", "wm_default_enabled",
-		// Output Shape (new 2026-04) — from Image Processing Settings via item.js
+		// Resize (new 2026-04) — from Image Processing Settings via item.js
 		"show_resize", "resize_settings",
+		// Comments (new 2026-04) — simple list of text overlays baked into
+		// the final output. The single-item flow uses a lightweight
+		// textarea-based editor (no drag). Batch flow uses the full
+		// CommentBoxEditor with draggable handles.
+		"show_comments", "comment_defaults", "comment_presets",
 	],
 	data() {
 		return {
@@ -431,6 +561,13 @@ export default {
 			// change so the user sees exactly what Crop will produce.
 			preview_dims: null,
 			_preview_debounce: null,
+			// Comments (new 2026-04) — simple list baked into the final
+			// Canvas composite. No drag UI here; edits via textarea + number
+			// inputs. For the full drag/resize experience, use the Item
+			// Image Batch.
+			comments_enabled: false,
+			comment_boxes: [],
+			preset_menu_open: false,
 		};
 	},
 	watch: {
@@ -460,6 +597,11 @@ export default {
 		wm_tile_spacing() { this._schedule_preview_update(); },
 		local_padding_pct() { this._schedule_preview_update(); },
 		bg_removed() { this._schedule_preview_update(); },
+		comments_enabled() { this._schedule_preview_update(); },
+		comment_boxes: {
+			handler() { this._schedule_preview_update(); },
+			deep: true,
+		},
 	},
 	mounted() {
 		// Remove BG: cached files + bbox metadata (Phase 1)
@@ -496,7 +638,7 @@ export default {
 			this.load_watermark_image(this.watermark_settings.watermark_image);
 		}
 
-		// Output Shape: load settings (new 2026-04)
+		// Resize: load settings (new 2026-04)
 		if (this.show_resize && this.resize_settings) {
 			this.resize_enabled = !!this.resize_settings.resize_enabled;
 			this.resize_aspect = this.resize_settings.resize_aspect || "1:1";
@@ -505,6 +647,12 @@ export default {
 			this.resize_flatten_rgb = !!this.resize_settings.resize_flatten_rgb;
 			this.max_file_size_kb = this.resize_settings.max_file_size_kb || 2048;
 		}
+
+		// Comments: off by default on new uploads. The user has to opt in
+		// each time (unlike Resize which follows the Settings default)
+		// because comments carry meaning — users shouldn't accidentally
+		// bake a previous session's text onto a new photo.
+		// comment_boxes starts empty; user adds them with + Add Comment.
 
 		// Global listeners for watermark drag
 		this._on_mousemove = this.on_wrapper_mousemove.bind(this);
@@ -766,11 +914,20 @@ export default {
 				}
 			}
 
-			// ── Output Shape step (new 2026-04) ──
+			// ── Comments step (new 2026-04) ──
+			// Bake text overlays onto the cropped canvas BEFORE aspect
+			// normalization, so box positions stay attached to product
+			// content (not to Contain-padded fill strips).
+			if (this.show_comments && this.comments_enabled && this.comment_boxes.length > 0) {
+				const cctx = canvas.getContext("2d");
+				this._composite_comments_on_canvas(canvas, cctx);
+			}
+
+			// ── Resize step (new 2026-04) ──
 			// Apply aspect normalization + optional RGB flatten to a fresh
 			// canvas that mirrors the server-side PIL helper in
 			// item_image_batch.py::_apply_aspect_normalize. Happens AFTER the
-			// watermark composite (so comments / watermark stay on product
+			// watermark + comments composites (so both stay on product
 			// content, not on Contain-padded fill strips).
 			let final_canvas = canvas;
 			if (this.show_resize && this.resize_enabled) {
@@ -910,6 +1067,112 @@ export default {
 			return out;
 		},
 
+		// ── Comments (new 2026-04) ──
+		_add_comment() {
+			const d = this.comment_defaults || {};
+			this.comment_boxes.push({
+				text: "",
+				position_x_pct: 50,
+				position_y_pct: 50,
+				width_pct: 40,
+				height_pct: 10,
+				font_family: d.font_family || "Arial",
+				font_size_pct: d.font_size_pct || 5.0,
+				font_weight: d.font_weight || "Normal",
+				font_style: d.font_style || "Normal",
+				color: d.color || "#000000",
+				align: d.align || "Center",
+			});
+		},
+		_update_comment(i, field, value) {
+			const current = this.comment_boxes[i];
+			if (!current) return;
+			this.$set(this.comment_boxes, i, { ...current, [field]: value });
+		},
+		_delete_comment(i) {
+			this.comment_boxes.splice(i, 1);
+		},
+		_toggle_preset_menu() {
+			this.preset_menu_open = !this.preset_menu_open;
+		},
+		_insert_preset(preset) {
+			this.comment_boxes.push({
+				text: preset.text || "",
+				position_x_pct: preset.position_x_pct ?? 50,
+				position_y_pct: preset.position_y_pct ?? 50,
+				width_pct: preset.width_pct ?? 40,
+				height_pct: preset.height_pct ?? 10,
+				font_family: preset.font_family || "Arial",
+				font_size_pct: preset.font_size_pct ?? 5.0,
+				font_weight: preset.font_weight || "Normal",
+				font_style: preset.font_style || "Normal",
+				color: preset.color || "#000000",
+				align: preset.align || "Center",
+			});
+			this.preset_menu_open = false;
+		},
+
+		// Paint all enabled comment boxes onto the cropped canvas. Called
+		// after watermark compositing, before aspect normalize, so boxes
+		// stay attached to content (not Contain-padded fill strips).
+		// Mirrors the server-side _apply_comment_boxes in item_image_batch.py.
+		_composite_comments_on_canvas(canvas, ctx) {
+			if (!this.comment_boxes || this.comment_boxes.length === 0) return;
+			const w = canvas.width;
+			const h = canvas.height;
+			for (const box of this.comment_boxes) {
+				if (!box.text) continue;
+				const font_size_px = Math.max(1, Math.round(h * (box.font_size_pct || 5.0) / 100));
+				const family = box.font_family || "Arial";
+				const weight = box.font_weight === "Bold" ? "bold" : "normal";
+				const style = box.font_style === "Italic" ? "italic" : "normal";
+				ctx.font = `${style} ${weight} ${font_size_px}px "${family}", sans-serif`;
+				ctx.fillStyle = box.color || "#000000";
+
+				const cx = w * (box.position_x_pct || 50) / 100;
+				const cy = h * (box.position_y_pct || 50) / 100;
+				const box_w_px = w * (box.width_pct || 40) / 100;
+
+				// Simple greedy word-wrap (same intent as _wrap_to_width on server)
+				const lines = this._wrap_text_to_width(
+					String(box.text || ""), box_w_px, ctx
+				);
+				const line_h = font_size_px * 1.2;
+				const total_h = lines.length * line_h;
+				let y_cursor = cy - total_h / 2 + line_h * 0.75;
+				for (const line of lines) {
+					const line_w = ctx.measureText(line).width;
+					let x;
+					if (box.align === "Left") x = cx - box_w_px / 2;
+					else if (box.align === "Right") x = cx + box_w_px / 2 - line_w;
+					else x = cx - line_w / 2;
+					ctx.fillText(line, x, y_cursor);
+					y_cursor += line_h;
+				}
+			}
+		},
+
+		_wrap_text_to_width(text, max_width_px, ctx) {
+			if (!text) return [];
+			const out = [];
+			for (const paragraph of text.split("\n")) {
+				if (!paragraph) { out.push(""); continue; }
+				const words = paragraph.split(" ");
+				let line = "";
+				for (const word of words) {
+					const candidate = line ? `${line} ${word}` : word;
+					if (ctx.measureText(candidate).width <= max_width_px || !line) {
+						line = candidate;
+					} else {
+						out.push(line);
+						line = word;
+					}
+				}
+				if (line) out.push(line);
+			}
+			return out;
+		},
+
 		// ── Live preview (new 2026-04) ──
 		_schedule_preview_update() {
 			if (this._preview_debounce) clearTimeout(this._preview_debounce);
@@ -943,6 +1206,11 @@ export default {
 			wctx.drawImage(src, 0, 0);
 			if (this.wm_enabled && this.wm_loaded && this.wm_img) {
 				this._composite_watermark_on_canvas(work, wctx);
+			}
+			// Comments — baked BEFORE Resize so box positions stay attached
+			// to product content, not to Contain-padded fill strips.
+			if (this.show_comments && this.comments_enabled) {
+				this._composite_comments_on_canvas(work, wctx);
 			}
 
 			// Apply Resize (same helper used on final crop)
@@ -1957,6 +2225,105 @@ img {
 	color: #64748b;
 	text-align: center;
 	font-variant-numeric: tabular-nums;
+}
+
+/* Comments list (new 2026-04) — simple inline editor for single-item
+   uploads. Full drag/resize experience lives in the Item Image Batch
+   CommentBoxEditor.vue; here we just need fast textarea + position
+   number inputs. */
+.adjustments-row-comments {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.comments-empty-hint {
+	font-size: 12px;
+	color: #94a3b8;
+	font-style: italic;
+	padding: 4px 0;
+}
+.comment-entry {
+	border: 1px solid #e5edf8;
+	border-radius: 6px;
+	background: #fafbfc;
+	padding: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.comment-entry-header {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+}
+.comment-entry-idx {
+	font-size: 11px;
+	color: #64748b;
+	font-weight: 600;
+	padding-top: 4px;
+	min-width: 20px;
+}
+.comment-text-input {
+	flex: 1;
+	padding: 4px 6px;
+	border: 1px solid #cbd5e1;
+	border-radius: 4px;
+	font-size: 13px;
+	resize: vertical;
+	min-height: 28px;
+}
+.comment-delete {
+	padding: 2px 8px;
+	line-height: 1;
+}
+.comment-entry-controls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+.comment-control {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 11px;
+	color: #606266;
+}
+.comment-num-input {
+	width: 52px;
+	padding: 2px 4px;
+	font-size: 11px;
+}
+.comments-actions {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	position: relative;
+}
+.comment-preset-menu {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	background: #fff;
+	border: 1px solid #cbd5e1;
+	border-radius: 4px;
+	min-width: 220px;
+	max-height: 240px;
+	overflow-y: auto;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+	z-index: 10;
+}
+.comment-preset-item {
+	padding: 6px 10px;
+	font-size: 12px;
+	cursor: pointer;
+	border-bottom: 1px solid #f1f5f9;
+}
+.comment-preset-item:hover {
+	background: #ecf5ff;
+}
+.comment-preset-item:last-child {
+	border-bottom: none;
 }
 </style>
 

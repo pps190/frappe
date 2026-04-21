@@ -28,6 +28,9 @@ export default class FileUploader {
 		watermark_settings,
 		show_resize,
 		resize_settings,
+		show_comments,
+		comment_defaults,
+		comment_presets,
 	} = {}) {
 		frm && frm.attachments.max_reached(true);
 		this.show_remove_bg = show_remove_bg;
@@ -38,6 +41,9 @@ export default class FileUploader {
 		this.watermark_settings = watermark_settings;
 		this.show_resize = show_resize;
 		this.resize_settings = resize_settings;
+		this.show_comments = show_comments;
+		this.comment_defaults = comment_defaults;
+		this.comment_presets = comment_presets;
 
 		if (!wrapper) {
 			this.make_dialog(dialog_title);
@@ -72,6 +78,9 @@ export default class FileUploader {
 						watermark_settings,
 						show_resize,
 						resize_settings,
+						show_comments,
+						comment_defaults,
+						comment_presets,
 					},
 				}),
 		});
