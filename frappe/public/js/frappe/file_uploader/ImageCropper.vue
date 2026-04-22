@@ -1300,9 +1300,11 @@ export default {
 		async save_crop_defaults() {
 			// Persist the full Crop-toolbar state (aspect + solid
 			// background + colour) as system-wide defaults in Image
-			// Processing Settings. Updating in-process cache too so
-			// re-opening the uploader without refreshing picks up the
-			// new defaults. Mirrors save_padding_default.
+			// Processing Settings. After the write, refetch the full
+			// settings object so the in-process cache is guaranteed to
+			// match whatever the server returns (rather than just the
+			// three fields we wrote — protects against a mismatch if
+			// Settings grows new fields that depend on these).
 			const aspect = this._aspect_number_to_string(this.aspect_ratio);
 			const solid = this.solid_background ? 1 : 0;
 			const colour = this.background_color || "#FFFFFF";
@@ -1319,10 +1321,27 @@ export default {
 						},
 					},
 				});
-				if (frappe._image_processing_settings_cache) {
-					frappe._image_processing_settings_cache.crop_aspect = aspect;
-					frappe._image_processing_settings_cache.solid_background = !!solid;
-					frappe._image_processing_settings_cache.background_color = colour;
+				// Refetch the settings cache so the next uploader opens
+				// with the just-saved values. Without this, users who
+				// clicked Save but didn't refresh the page saw the old
+				// defaults on the next Upload click because item.js
+				// reads from the in-memory cache, not the DB.
+				try {
+					const resp = await frappe.call({
+						method: "next.next.doctype.image_processing_settings.image_processing_settings.get_image_processing_settings",
+					});
+					if (resp && resp.message) {
+						frappe._image_processing_settings_cache = resp.message;
+					}
+				} catch (e) {
+					// Fall back to patching the three fields locally if
+					// the refetch fails (e.g. network hiccup) — the write
+					// itself already succeeded.
+					if (frappe._image_processing_settings_cache) {
+						frappe._image_processing_settings_cache.crop_aspect = aspect;
+						frappe._image_processing_settings_cache.solid_background = !!solid;
+						frappe._image_processing_settings_cache.background_color = colour;
+					}
 				}
 				frappe.show_alert({
 					message: __("Crop defaults saved"),
