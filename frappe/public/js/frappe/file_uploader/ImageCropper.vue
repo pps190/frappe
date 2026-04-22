@@ -97,22 +97,30 @@
 			</div>
 
 			<!-- Cropper canvas — main image with all overlays.
-			     Occupies the full left-col below the toolbar. Preview
-			     thumb lives in the toolbar (top row, right-aligned)
-			     so it doesn't eat cropper workspace. -->
-			<div
-				class="cropper-image-wrapper"
-				ref="wrapper"
-				:class="{
-					'wm-mode': interaction_mode === 'watermark' && wm_mode === 'Corner',
-					'comment-mode': interaction_mode === 'comment',
-					'bg-processing': bg_processing,
-				}"
-				@mousedown="on_wrapper_mousedown"
-				@wheel.prevent="on_wrapper_wheel"
-				@touchstart="on_wrapper_touchstart"
-			>
-				<img ref="image" :src="src" :alt="file.name" />
+			     Two-level layout:
+			       .cropper-image-stage  — the flex-growing dark backdrop.
+			       .cropper-image-wrapper — sized to the image's natural
+			         aspect ratio so there is NO "grey dead-zone" outside
+			         the picture. The image's edge is visually obvious
+			         (distinct bg + border), and the crop box's constraint
+			         stops exactly at that edge — matching every common
+			         image-cropper UX (Photoshop / Figma / Lightroom /
+			         Instagram). -->
+			<div class="cropper-image-stage">
+				<div
+					class="cropper-image-wrapper"
+					ref="wrapper"
+					:class="{
+						'wm-mode': interaction_mode === 'watermark' && wm_mode === 'Corner',
+						'comment-mode': interaction_mode === 'comment',
+						'bg-processing': bg_processing,
+					}"
+					:style="wrapper_aspect_style"
+					@mousedown="on_wrapper_mousedown"
+					@wheel.prevent="on_wrapper_wheel"
+					@touchstart="on_wrapper_touchstart"
+				>
+					<img ref="image" :src="src" :alt="file.name" @load="on_image_load" />
 				<canvas
 					v-if="wm_enabled && wm_loaded"
 					ref="wm_canvas"
@@ -159,6 +167,7 @@
 				<div v-if="bg_processing" class="cropper-loading-overlay">
 					<div class="cropper-spinner"></div>
 					<div class="cropper-loading-text">{{ __("Removing background...") }}</div>
+				</div>
 				</div>
 			</div>
 
@@ -768,6 +777,11 @@ export default {
 			// Canvas data cache (image display rect in cropper wrapper)
 			// updated on cropper ready + crop event for overlay positioning.
 			_canvas_data: null,
+			// Natural aspect ratio (w/h) of the source image, driven by the
+			// <img @load> handler. Used to size .cropper-image-wrapper to
+			// exactly the picture's contain-bbox so the crop box can't be
+			// dragged into empty dead-zones.
+			natural_aspect_ratio: null,
 			comment_font_families: [
 				"Arial", "Helvetica", "Times New Roman",
 				"Courier New", "Georgia", "Verdana",
@@ -1057,6 +1071,15 @@ export default {
 		}
 	},
 	computed: {
+		// CSS binding that sizes .cropper-image-wrapper to the source image's
+		// natural aspect ratio. Combined with max-width/max-height:100% in
+		// the stylesheet this gives a perfect contain-fit inside the stage,
+		// so the wrapper box edge == the image edge (no grey dead-zone the
+		// crop box can't reach).
+		wrapper_aspect_style() {
+			if (!this.natural_aspect_ratio) return {};
+			return { aspectRatio: String(this.natural_aspect_ratio) };
+		},
 		aspect_ratio_buttons() {
 			return [
 				{ label: __("1:1"), value: 1 },
@@ -1134,6 +1157,16 @@ export default {
 		},
 	},
 	methods: {
+		// Capture the source image's natural aspect ratio so the wrapper
+		// box (which CropperJS mounts on) sizes exactly to the image's
+		// contain-fit rect. Runs before init_cropper because CropperJS
+		// reads the container size once on mount.
+		on_image_load(e) {
+			const img = e && e.target;
+			if (img && img.naturalWidth && img.naturalHeight) {
+				this.natural_aspect_ratio = img.naturalWidth / img.naturalHeight;
+			}
+		},
 		// ── Image loading ──
 		load_image(file) {
 			if (window.FileReader) {
@@ -1149,6 +1182,19 @@ export default {
 			if (this.cropper) this.cropper.destroy();
 			let crop_box = this.file.crop_box_data;
 			this.image = this.$refs.image;
+			// Ensure the wrapper aspect ratio is set before CropperJS mounts —
+			// CropperJS reads the container size once, so a stale wrapper box
+			// leaves dead space around the picture. Vue's @load usually fires
+			// this, but for fast data URL decodes the browser may skip the
+			// load event if the image is already complete in cache.
+			if (
+				this.image &&
+				this.image.naturalWidth &&
+				this.image.naturalHeight
+			) {
+				this.natural_aspect_ratio =
+					this.image.naturalWidth / this.image.naturalHeight;
+			}
 			this.image.onload = () => {
 				this.cropper = new Cropper(this.image, {
 					zoomable: false,
@@ -2968,18 +3014,53 @@ img {
 	white-space: nowrap;
 }
 
-/* Cropper takes the full height of the left column below the toolbar.
-   Preview now sits inline in the toolbar (50×50 thumb), so we don't
-   need a side-by-side split anymore. Deep neutral background so both
-   transparent and opaque images read clearly. */
-.cropper-image-wrapper {
+/* Two-level cropper layout.
+   .cropper-image-stage — the dark flex-filling backdrop (shows around
+     the picture when the workspace aspect differs from the image).
+   .cropper-image-wrapper — sized to the image's natural aspect ratio
+     via :style="wrapper_aspect_style" so its bounding rect matches the
+     actual image display rect. CropperJS mounts on this, so the crop
+     box's bounds equal the image edges — no grey dead-zone the box
+     can't reach. Matches Photoshop / Figma / Lightroom behaviour. */
+.cropper-image-stage {
 	position: relative;
 	flex: 1 1 auto;
 	min-height: 0;
 	min-width: 0;
-	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	background: #2c2c2c;
 	border-radius: 8px;
+	padding: 12px;
+	overflow: hidden;
+}
+.cropper-image-wrapper {
+	position: relative;
+	max-width: 100%;
+	max-height: 100%;
+	/* aspect-ratio is applied inline via wrapper_aspect_style. Until the
+	   <img @load> handler fires (first paint / SSR-like state) fall back
+	   to 1 so the empty box has a sane shape. */
+	aspect-ratio: 1;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	border-radius: 4px;
+	/* Subtle checkerboard shows through transparent PNGs so the user can
+	   see "this area is transparent" instead of guessing from grey. */
+	background-color: #fdfdfd;
+	background-image:
+		linear-gradient(45deg, #e9edf2 25%, transparent 25%),
+		linear-gradient(-45deg, #e9edf2 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #e9edf2 75%),
+		linear-gradient(-45deg, transparent 75%, #e9edf2 75%);
+	background-size: 16px 16px;
+	background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+	/* Distinct border so the image's edge is visually obvious — the
+	   crop box stops exactly here. */
+	box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18),
+		0 4px 18px rgba(0, 0, 0, 0.35);
 }
 .cropper-image-wrapper img {
 	max-width: 100%;
