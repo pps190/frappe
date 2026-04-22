@@ -444,7 +444,14 @@
 						</div>
 					</div>
 
-					<!-- ── COMMENTS pane ── -->
+					<!-- ── COMMENTS pane ──
+					     Reuses the CommentBoxEditor component in sidebar-only
+					     mode (hide-canvas) so Step 1 shares the same list +
+					     per-box form + two-tier Save/Reset as Step 2's cropper
+					     and the batch Header / Row editors. The box list is
+					     carried into the cropper via :initial_comment_boxes,
+					     so any boxes the user builds here are waiting on Step
+					     2 when they pick a file. -->
 					<div v-show="active_tab === 'comments'" class="cropper-tab-pane">
 						<div class="cropper-tab-enable">
 							<span class="cropper-tab-enable-label">{{ __("Enable Comments") }}</span>
@@ -460,55 +467,16 @@
 								</span>
 							</div>
 						</div>
-						<div v-if="comments_enabled_default && local_comment_defaults" class="adjustments-row">
-							<label class="adjustments-field-label">{{ __("Default style for new comment boxes") }}</label>
-							<div class="wm-slider-row">
-								<label class="wm-slider-label">{{ __("Font") }}</label>
-								<select class="wm-select-inline"
-									:value="local_comment_defaults.font_family || 'Arial'"
-									@change="_set_comment_default('font_family', $event.target.value)">
-									<option v-for="f in ['Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana']" :key="f" :value="f">{{ f }}</option>
-								</select>
-							</div>
-							<div class="wm-slider-row">
-								<label class="wm-slider-label">{{ __("Size") }}</label>
-								<input type="range" class="wm-slider" min="1" max="20" step="0.5"
-									:value="local_comment_defaults.font_size_pct || 5"
-									@input="_set_comment_default('font_size_pct', parseFloat($event.target.value))" />
-								<span class="wm-slider-value">{{ (local_comment_defaults.font_size_pct || 5).toFixed(1) }}%</span>
-							</div>
-							<div class="wm-inline-row">
-								<label class="wm-inline-check">
-									<input type="checkbox"
-										:checked="local_comment_defaults.font_weight === 'Bold'"
-										@change="_set_comment_default('font_weight', $event.target.checked ? 'Bold' : 'Normal')" />
-									<span><strong>B</strong></span>
-								</label>
-								<label class="wm-inline-check">
-									<input type="checkbox"
-										:checked="local_comment_defaults.font_style === 'Italic'"
-										@change="_set_comment_default('font_style', $event.target.checked ? 'Italic' : 'Normal')" />
-									<span><em>I</em></span>
-								</label>
-								<label class="wm-inline-colour">
-									<span>{{ __("Color") }}</span>
-									<input type="color"
-										:value="local_comment_defaults.color || '#000000'"
-										@input="_set_comment_default('color', $event.target.value)" />
-								</label>
-							</div>
-							<label class="adjustments-field-label" style="margin-top:8px">{{ __("Align") }}</label>
-							<div class="segmented-tabs" role="tablist">
-								<button v-for="a in ['Left', 'Center', 'Right']" :key="a"
-									type="button" class="segmented-tab"
-									:class="{ active: (local_comment_defaults.align || 'Center') === a }"
-									@click="_set_comment_default('align', a)">{{ __(a) }}</button>
-							</div>
-							<div class="wm-panel-actions">
-								<button class="btn btn-xs btn-default" @click="_reset_comment_default">{{ __("Reset") }}</button>
-								<button class="btn btn-xs btn-primary-light" @click="_save_comment_default">{{ __("Save as Default") }}</button>
-							</div>
-						</div>
+						<CommentBoxEditor
+							v-if="comments_enabled_default"
+							hide-canvas
+							:boxes="step1_comment_boxes"
+							:presets="comment_presets || []"
+							:defaults="local_comment_defaults || {}"
+							:enabled="comments_enabled_default"
+							@change="step1_comment_boxes = $event"
+							@reset-enabled="comments_enabled_default = !!(comment_defaults && comment_defaults.enabled)"
+						/>
 					</div>
 
 					<!-- ── CANVAS pane ── -->
@@ -583,6 +551,7 @@
 			:comment_defaults="local_comment_defaults"
 			:comment_presets="comment_presets"
 			:comments_default_enabled="comments_enabled_default"
+			:initial_comment_boxes="step1_comment_boxes"
 			@toggle_image_cropper="toggle_image_cropper(-1)"
 			@upload_after_crop="trigger_upload = true"
 			@remove_bg_changed="remove_bg_checked = $event"
@@ -606,6 +575,12 @@ import FileBrowser from "./FileBrowser.vue";
 import WebLink from "./WebLink.vue";
 import GoogleDrivePicker from "../../integrations/google_drive_picker";
 import ImageCropper from "./ImageCropper.vue";
+// Cross-app import: CommentBoxEditor lives in the next app because
+// it's also used by the batch view. esbuild's NODE_PATHS resolves
+// `next/...` at build time. Step 1 renders it in sidebar-only mode
+// (hideCanvas) so users can build the comment list even before an
+// image is picked.
+import CommentBoxEditor from "next/public/js/item_image_batch/CommentBoxEditor.vue";
 
 export default {
 	name: "FileUploader",
@@ -702,6 +677,7 @@ export default {
 		FileBrowser,
 		WebLink,
 		ImageCropper,
+		CommentBoxEditor,
 	},
 	data() {
 		return {
@@ -727,6 +703,13 @@ export default {
 			// page exposes the same 4 features the cropper tab-panel does.
 			comments_enabled_default: !!(this.comment_defaults && this.comment_defaults.enabled),
 			resize_enabled_default: !!(this.resize_settings && this.resize_settings.resize_enabled),
+			// Step-1 comment box list, seeded from Settings.comment_presets
+			// so "Save as Default" and the initial hydrated list stay in
+			// sync. Any edits here carry over into the cropper's Step 2
+			// via the :initial_comment_boxes prop on ImageCropper.
+			step1_comment_boxes: Array.isArray(this.comment_presets)
+				? this.comment_presets.map((p) => ({ ...p }))
+				: [],
 			// Auto-crop padding — initial value comes from Image Processing
 			// Settings (remove_bg_padding_pct prop). User can override on
 			// Step 1 before picking a file.
@@ -945,15 +928,24 @@ export default {
 			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
 		},
 		_save_bg_default() {
+			// Save both the enable toggle AND the padding so "Save as
+			// Default" reflects the full Remove BG tab state. Matches the
+			// behavior of the Canvas tab (which also persists its enable
+			// flag). Remove BG availability on the site might still
+			// override this to false at load time if the microservice
+			// isn't configured.
 			frappe.call({
 				method: "frappe.client.set_value",
 				args: {
 					doctype: "Image Processing Settings",
 					name: "Image Processing Settings",
-					fieldname: { remove_bg_padding_pct: this.step1_padding_pct },
+					fieldname: {
+						remove_bg_enabled: this.remove_bg_checked ? 1 : 0,
+						remove_bg_padding_pct: this.step1_padding_pct,
+					},
 				},
 			}).then(() => {
-				frappe.show_alert({ message: __("Auto-crop padding saved as default"), indicator: "green" });
+				frappe.show_alert({ message: __("Remove BG defaults saved"), indicator: "green" });
 			}).catch(() => {
 				frappe.show_alert({ message: __("Failed to save default"), indicator: "red" });
 			});
@@ -967,12 +959,16 @@ export default {
 		_save_wm_default() {
 			const s = this.local_watermark_settings;
 			if (!s) return;
+			// Save both the Enable Watermark toggle (Watermark Settings.enabled)
+			// AND all Tiled/Corner params so next upload opens with the same
+			// state the user just configured.
 			frappe.call({
 				method: "frappe.client.set_value",
 				args: {
 					doctype: "Watermark Settings",
 					name: "Watermark Settings",
 					fieldname: {
+						enabled: this.wm_enabled ? 1 : 0,
 						mode: s.mode || "Tiled",
 						position_x: s.position_x != null ? s.position_x : 80,
 						position_y: s.position_y != null ? s.position_y : 90,
@@ -990,6 +986,7 @@ export default {
 				// the new defaults without a page reload.
 				if (frappe._watermark_settings_cache) {
 					Object.assign(frappe._watermark_settings_cache, s);
+					frappe._watermark_settings_cache.enabled = !!this.wm_enabled;
 				}
 				frappe.show_alert({ message: __("Watermark defaults saved"), indicator: "green" });
 			}).catch(() => {
@@ -1005,12 +1002,17 @@ export default {
 		_save_comment_default() {
 			const c = this.local_comment_defaults;
 			if (!c) return;
+			// Save enable state too so "Save as Default" is truly the full
+			// tab state. default_comments_enabled was added to Image
+			// Processing Settings specifically to carry this flag; see
+			// image_processing_settings.json.
 			frappe.call({
 				method: "frappe.client.set_value",
 				args: {
 					doctype: "Image Processing Settings",
 					name: "Image Processing Settings",
 					fieldname: {
+						default_comments_enabled: this.comments_enabled_default ? 1 : 0,
 						default_comment_font_family: c.font_family || "Arial",
 						default_comment_font_size_pct: c.font_size_pct || 5,
 						default_comment_font_weight: c.font_weight || "Normal",

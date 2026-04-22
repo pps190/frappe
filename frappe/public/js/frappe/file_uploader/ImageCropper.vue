@@ -544,14 +544,34 @@
 									/>
 								</label>
 							</div>
+
+							<!-- Per-box style save / reset: applies to the
+							     currently-selected box only. Persists the 6
+							     style fields (font / size / weight / style /
+							     color / align) to Image Processing Settings
+							     as the new "default style for new boxes". -->
+							<div class="comment-entry-actions">
+								<button type="button" class="btn btn-xs btn-default" @click.stop="_reset_comment_style(i)">
+									{{ __("Reset Style") }}
+								</button>
+								<button type="button" class="btn btn-xs btn-primary-light" @click.stop="_save_comment_style(i)">
+									{{ __("Save Style as Default") }}
+								</button>
+							</div>
 						</div>
 
+						<!-- Panel-level save / reset: captures the full
+						     Comments tab state (enable flag + current box
+						     list) into Image Processing Settings so the
+						     next upload / batch / row opens with the same
+						     defaults. Mirrors Remove BG / Watermark /
+						     Canvas tab-level save. -->
 						<div class="wm-panel-actions">
-							<button class="btn btn-xs btn-default" @click="_reset_comments_to_defaults">
+							<button class="btn btn-xs btn-default" @click="_reset_comments_panel">
 								{{ __("Reset") }}
 							</button>
-							<button class="btn btn-xs btn-primary-light" @click="_save_comment_defaults">
-								{{ __("Save Style as Default") }}
+							<button class="btn btn-xs btn-primary-light" @click="_save_comments_panel">
+								{{ __("Save as Default") }}
 							</button>
 						</div>
 					</div>
@@ -667,6 +687,10 @@ export default {
 		// textarea-based editor (no drag). Batch flow uses the full
 		// CommentBoxEditor with draggable handles.
 		"show_comments", "comment_defaults", "comment_presets", "comments_default_enabled",
+		// Carry-over from Step 1's sidebar-only CommentBoxEditor: any
+		// box list the user built before picking a file starts life
+		// here inside the cropper so they don't have to re-enter it.
+		"initial_comment_boxes",
 	],
 	data() {
 		return {
@@ -897,8 +921,20 @@ export default {
 		// has to opt in either on the file-picker page or via the tab.
 		if (this.show_comments) {
 			this.comments_enabled = !!this.comments_default_enabled;
+			// Seed the comment list. Priority:
+			//   1. initial_comment_boxes (carried over from Step 1's
+			//      sidebar-only CommentBoxEditor — user's pre-file-pick
+			//      edits take precedence)
+			//   2. Settings.comment_presets (global default)
+			//   3. empty list
+			// Deep-clone in either case to avoid sharing refs with the
+			// caller's array.
+			if (Array.isArray(this.initial_comment_boxes) && this.initial_comment_boxes.length) {
+				this.comment_boxes = this.initial_comment_boxes.map((p) => ({ ...p }));
+			} else if (Array.isArray(this.comment_presets) && this.comment_presets.length) {
+				this.comment_boxes = this.comment_presets.map((p) => ({ ...p }));
+			}
 		}
-		// comment_boxes starts empty; user adds them with + Add Comment.
 
 		// Global listeners for watermark drag
 		this._on_mousemove = this.on_wrapper_mousemove.bind(this);
@@ -1635,49 +1671,91 @@ export default {
 			}
 		},
 
-		// ── Reset / save comment-style defaults ──
-		_reset_comments_to_defaults() {
-			if (!this.comment_boxes.length) return;
-			const d = this.comment_defaults || {};
-			for (let i = 0; i < this.comment_boxes.length; i++) {
-				const box = this.comment_boxes[i];
-				this.$set(this.comment_boxes, i, {
-					...box,
-					font_family: d.font_family || "Arial",
-					font_size_pct: d.font_size_pct || 5.0,
-					font_weight: d.font_weight || "Normal",
-					font_style: d.font_style || "Normal",
-					color: d.color || "#000000",
-					align: d.align || "Center",
-				});
-			}
-		},
-		_save_comment_defaults() {
-			// Save the currently-selected box's style (or box #1's if none
-			// selected) as the new system-wide default via the Settings API.
-			const idx = this.selected_comment_idx >= 0 ? this.selected_comment_idx : 0;
-			const box = this.comment_boxes[idx];
-			if (!box) {
-				frappe.show_alert({ message: __("No comment to save as default"), indicator: "orange" });
-				return;
-			}
+		// ── Per-box style save / reset (Save Style as Default) ──
+		// Writes the 6 style fields of THIS box to Image Processing
+		// Settings' default_comment_*. Position / size / rotation / text
+		// stay per-box and are never part of the global default.
+		_save_comment_style(i) {
+			const box = this.comment_boxes[i];
+			if (!box) return;
 			frappe.call({
 				method: "frappe.client.set_value",
 				args: {
 					doctype: "Image Processing Settings",
 					name: "Image Processing Settings",
 					fieldname: {
-						default_comment_font_family: box.font_family,
-						default_comment_font_size_pct: box.font_size_pct,
-						default_comment_font_weight: box.font_weight,
-						default_comment_font_style: box.font_style,
-						default_comment_color: box.color,
-						default_comment_align: box.align,
+						default_comment_font_family: box.font_family || "Arial",
+						default_comment_font_size_pct: box.font_size_pct || 5.0,
+						default_comment_font_weight: box.font_weight || "Normal",
+						default_comment_font_style: box.font_style || "Normal",
+						default_comment_color: box.color || "#000000",
+						default_comment_align: box.align || "Center",
 					},
 				},
 				callback: () => {
-					frappe.show_alert({ message: __("Comment style saved as default"), indicator: "green" });
+					frappe.show_alert({
+						message: __("Comment style saved as default"),
+						indicator: "green",
+					});
 				},
+			});
+		},
+
+		// Reset THIS box's style fields back to comment_defaults (which
+		// mirrors Image Processing Settings' default_comment_*). Other
+		// fields (position, size, text) remain untouched.
+		_reset_comment_style(i) {
+			const box = this.comment_boxes[i];
+			if (!box) return;
+			const d = this.comment_defaults || {};
+			this.$set(this.comment_boxes, i, {
+				...box,
+				font_family: d.font_family || "Arial",
+				font_size_pct: d.font_size_pct || 5.0,
+				font_weight: d.font_weight || "Normal",
+				font_style: d.font_style || "Normal",
+				color: d.color || "#000000",
+				align: d.align || "Center",
+			});
+			frappe.show_alert({
+				message: __("Style reset to default"),
+				indicator: "blue",
+			});
+		},
+
+		// ── Panel-level save / reset (Save as Default) ──
+		// Writes the full Comments tab state — enable flag + whole
+		// box list — to Image Processing Settings via a single
+		// whitelisted endpoint. Matches the Save as Default button
+		// on Remove BG / Watermark / Canvas tabs.
+		_save_comments_panel() {
+			frappe.call({
+				method: "next.next.doctype.image_processing_settings.image_processing_settings.update_comment_presets",
+				args: {
+					presets_json: JSON.stringify(this.comment_boxes || []),
+					enabled: this.comments_enabled ? 1 : 0,
+				},
+				callback: () => {
+					frappe.show_alert({
+						message: __("Saved {0} comments as default", [this.comment_boxes.length]),
+						indicator: "green",
+					});
+				},
+			});
+		},
+
+		// Reset the panel — replace box list with the current
+		// comment_presets prop (which is the singleton's saved list).
+		// Also flips the enable toggle back to the saved default.
+		_reset_comments_panel() {
+			this.comment_boxes = Array.isArray(this.comment_presets)
+				? this.comment_presets.map((p) => ({ ...p }))
+				: [];
+			this.selected_comment_idx = -1;
+			this.comments_enabled = !!this.comments_default_enabled;
+			frappe.show_alert({
+				message: __("Reset to saved defaults"),
+				indicator: "blue",
 			});
 		},
 
@@ -2475,12 +2553,16 @@ img {
 	gap: 8px;
 	margin-left: auto;
 }
+/* Match the Item Image Batch row thumbnail styling: transparent
+   background, contain-fit img, hover highlights. No colored box
+   around the thumb — transparent PNG shows as transparent (user
+   can zoom into the lightbox for full-resolution inspection with
+   checkerboard backing). */
 .cropper-preview-canvas,
 .cropper-preview-elimage {
 	width: 50px;
 	height: 50px;
 	border-radius: 6px;
-	background: #2c2c2c;
 	overflow: hidden;
 	display: block;
 	cursor: zoom-in;
@@ -2488,10 +2570,6 @@ img {
 	flex-shrink: 0;
 }
 .cropper-preview-canvas {
-	/* Fallback canvas before the first data URL lands in el-image.
-	   _render_preview sets internal .width/height and style.width/
-	   height directly on this canvas, so we leave those auto and
-	   only size the outer box. */
 	max-width: 50px;
 	max-height: 50px;
 }
@@ -2504,13 +2582,17 @@ img {
 	object-fit: contain;
 	width: 100%;
 	height: 100%;
+	background: transparent;
 }
-/* Mini spinner that replaces the thumb while Remove BG is running. */
+/* Mini spinner that replaces the thumb while Remove BG is running.
+   Dark backing only HERE because a spinner needs contrast — the
+   actual preview image uses transparent. */
 .cropper-toolbar-preview-spinner {
 	width: 50px;
 	height: 50px;
 	border-radius: 6px;
-	background: #2c2c2c;
+	background: #f1f5f9;
+	border: 1px solid var(--border-color);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -3378,6 +3460,15 @@ img {
 	gap: 10px;
 	align-items: center;
 }
+/* Per-box action row (Reset Style / Save Style as Default). */
+.comment-entry-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px dashed #e2e8f0;
+}
 .comment-control {
 	display: inline-flex;
 	align-items: center;
@@ -3623,31 +3714,27 @@ img {
 
 /* Element UI's <el-image> mounts its image-viewer lightbox at
    document.body — it's not inside the Vue subtree so scoped styles
-   can't reach it. These rules apply globally and fix two issues:
+   can't reach it. Bootstrap's modal uses z-index: 1055, so without
+   this bump the viewer opens UNDERNEATH the upload dialog and the
+   user can't interact with it.
 
-   1) z-index: the viewer defaults below Bootstrap's modal (1055)
-      so it opens UNDERNEATH the upload dialog. Bump to 2050.
-
-   2) Transparent PNG readability: by default the viewer shows the
-      image on a translucent dark mask — transparent pixels become
-      dark mask + whatever shows through. For product photos with
-      Remove BG, that makes edges hard to see against the backdrop.
-      Fix: OPAQUE dark mask (can't see through to the page below),
-      and a CHECKERBOARD background behind the image element so
-      the user can tell image pixels from transparent ones.
-      Same industry pattern as Photoshop / Figma / Photopea
-      "full-size transparent view". */
+   NOTE: do NOT override .el-image-viewer__mask's background or
+   opacity — that element is the full-viewport positioning container
+   for the img, so backgrounding it paints over the image too. The
+   mask's default translucent black is already fine for a lightbox.
+   For transparent-PNG readability we add checkerboard to the img
+   itself below. */
 .el-image-viewer__wrapper {
 	z-index: 2050 !important;
 }
 .el-image-viewer__mask {
 	z-index: 2049 !important;
-	background: #0f172a !important;   /* opaque slate-900 */
-	opacity: 1 !important;
 }
 .el-image-viewer__canvas .el-image-viewer__img {
-	/* Checkerboard baked into the img element's background so PNG
-	   transparency is distinguishable from the mask behind it. */
+	/* Checkerboard baked into the img element so PNG transparency is
+	   visible in the lightbox. The img has its own pixel data on top,
+	   so the checker only shows through transparent regions — same
+	   pattern Photoshop / Figma / Photopea use for transparent view. */
 	background-color: #ffffff;
 	background-image:
 		linear-gradient(45deg, #d1d5db 25%, transparent 25%),
