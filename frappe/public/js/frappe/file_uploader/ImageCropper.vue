@@ -2,49 +2,10 @@
 	<div class="cropper-grid">
 		<!-- LEFT COLUMN: toolbar + cropper + preview + action buttons -->
 		<div class="cropper-left-col">
-			<!-- Top toolbar: Drag mode (crop/watermark/comment) + Crop ratio.
-			     Wraps to 2 rows on narrow screens. -->
+			<!-- Top toolbar: Crop ratio only. Drag mode tabs are gone —
+			     elements are selected by clicking them (comment box,
+			     watermark rect, or crop frame) and dragged in place. -->
 			<div class="cropper-top-toolbar">
-				<div class="cropper-toolbar-group" v-if="show_drag_mode_tabs">
-					<span class="cropper-toolbar-label">{{ __("Drag") }}:</span>
-					<div class="segmented-tabs" role="tablist">
-						<button
-							class="segmented-tab"
-							:class="{ active: interaction_mode === 'crop' }"
-							role="tab"
-							:aria-selected="interaction_mode === 'crop'"
-							:title="__('Drag to resize/move the crop box')"
-							@click="set_mode('crop')"
-						>
-							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/></svg>
-							{{ __("Crop box") }}
-						</button>
-						<button
-							v-if="show_watermark && wm_enabled && wm_loaded && wm_mode === 'Corner'"
-							class="segmented-tab"
-							:class="{ active: interaction_mode === 'watermark' }"
-							role="tab"
-							:aria-selected="interaction_mode === 'watermark'"
-							:title="__('Drag to move the watermark logo')"
-							@click="set_mode('watermark')"
-						>
-							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-							{{ __("Watermark") }}
-						</button>
-						<button
-							v-if="show_comments && comments_enabled && comment_boxes.length > 0"
-							class="segmented-tab"
-							:class="{ active: interaction_mode === 'comment' }"
-							role="tab"
-							:aria-selected="interaction_mode === 'comment'"
-							:title="__('Drag to move text comments')"
-							@click="set_mode('comment')"
-						>
-							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-							{{ __("Comment") }}
-						</button>
-					</div>
-				</div>
 				<div class="cropper-toolbar-group" v-if="fixed_aspect_ratio == null">
 					<span class="cropper-toolbar-label">{{ __("Crop ratio") }}:</span>
 					<div class="btn-group btn-group-sm">
@@ -125,8 +86,6 @@
 					class="cropper-image-wrapper"
 					ref="wrapper"
 					:class="{
-						'wm-mode': interaction_mode === 'watermark' && wm_mode === 'Corner',
-						'comment-mode': interaction_mode === 'comment',
 						'bg-processing': bg_processing,
 					}"
 					@mousedown="on_wrapper_mousedown"
@@ -138,7 +97,7 @@
 					v-if="wm_enabled && wm_loaded"
 					ref="wm_canvas"
 					class="watermark-overlay-canvas"
-					:style="{ pointerEvents: (interaction_mode === 'watermark' && wm_mode === 'Corner') ? 'auto' : 'none' }"
+					style="pointer-events: none;"
 				></canvas>
 				<!-- Comment overlay: DOM boxes drawn on top of the image so
 				     the user can see text positioning + drag them. -->
@@ -164,13 +123,13 @@
 							{{ box.text || __('(empty)') }}
 						</div>
 						<div
-							v-if="selected_comment_idx === i && interaction_mode === 'comment'"
+							v-if="selected_comment_idx === i && selected_type === 'comment'"
 							class="comment-rotate-handle"
 							:title="__('Rotate')"
 							@mousedown.stop="on_comment_rotate_mousedown($event, i)"
 						>↻</div>
 						<div
-							v-if="selected_comment_idx === i && interaction_mode === 'comment'"
+							v-if="selected_comment_idx === i && selected_type === 'comment'"
 							class="comment-resize-handle"
 							:title="__('Resize')"
 							@mousedown.stop="on_comment_resize_mousedown($event, i)"
@@ -760,8 +719,11 @@ export default {
 			wm_tile_opacity: 12,
 			wm_tile_rotation: -30,
 			wm_tile_spacing: 40,
-			// Interaction mode
-			interaction_mode: "crop",
+			// What's currently selected on the canvas: 'crop' | 'watermark'
+			// | 'comment'. Drives handle + outline visibility; does NOT
+			// gate drag permissions — every overlay element captures its
+			// own events regardless of selected_type.
+			selected_type: "crop",
 			// Output Shape (new 2026-04) — baked into the final cropped canvas
 			// before upload. Same logic as the server-side PIL helper in
 			// item_image_batch.py::_apply_aspect_normalize.
@@ -794,7 +756,11 @@ export default {
 			_comment_drag_start: null,
 			// Canvas data cache (image display rect in cropper wrapper)
 			// updated on cropper ready + crop event for overlay positioning.
-			_canvas_data: null,
+			// NB: no leading underscore — Vue 2 skips reactivity proxying for
+			// keys starting with `_` or `$`, so an underscore-prefixed data
+			// key would never trigger re-render of the comment_overlay_style
+			// / comment_text_style computeds that read it.
+			canvas_data: null,
 			comment_font_families: [
 				"Arial", "Helvetica", "Times New Roman",
 				"Courier New", "Georgia", "Verdana",
@@ -1109,7 +1075,7 @@ export default {
 		// the cropper wrapper as a whole). Position it via the cropper's
 		// getCanvasData() output so it tracks zoom + pan.
 		comment_overlay_style() {
-			const cd = this._canvas_data;
+			const cd = this.canvas_data;
 			if (!cd) return { display: "none" };
 			return {
 				position: "absolute",
@@ -1117,9 +1083,12 @@ export default {
 				top: cd.top + "px",
 				width: cd.width + "px",
 				height: cd.height + "px",
-				// pointerEvents only active when user is in comment mode,
-				// so watermark + crop drag still work from the same pixels.
-				pointerEvents: this.interaction_mode === "comment" ? "auto" : "none",
+				// Container is transparent to pointer events; each
+				// .comment-overlay-box re-enables them inside its own rect.
+				// That way clicking empty overlay passes through to the
+				// cropper (so you can still resize/move crop through areas
+				// that would otherwise be covered by comment mode).
+				pointerEvents: "none",
 			};
 		},
 
@@ -1142,13 +1111,6 @@ export default {
 		any_feature_shown() {
 			return !!(this.show_remove_bg || this.show_watermark ||
 			          this.show_comments || this.show_resize);
-		},
-
-		// Whether to show the 'Drag:' tab row above the cropper. Always
-		// rendered so toggling watermark / comment on doesn't cause the
-		// layout to shift — the 'Crop box' button is always visible.
-		show_drag_mode_tabs() {
-			return true;
 		},
 
 		// Human-readable output format label for the preview chip.
@@ -1509,7 +1471,7 @@ export default {
 			};
 		},
 		comment_text_style(box) {
-			const cd = this._canvas_data;
+			const cd = this.canvas_data;
 			// Compute px font size from the displayed image height, not
 			// the natural size (so on-screen text matches what user sees
 			// in the preview).
@@ -1530,15 +1492,20 @@ export default {
 		_update_canvas_data() {
 			if (!this.cropper) return;
 			try {
-				this._canvas_data = this.cropper.getCanvasData();
+				this.canvas_data = this.cropper.getCanvasData();
 			} catch (e) {
-				this._canvas_data = null;
+				this.canvas_data = null;
 			}
 		},
 
 		// ── Comment drag handlers ──
+		// Point-to-drag: clicking a comment box selects it AND starts a
+		// drag in one gesture. The template's @mousedown.stop already
+		// prevents this event from reaching the wrapper (which would
+		// flip selected_type to 'crop'), so we don't need to
+		// stopPropagation manually.
 		on_comment_mousedown(e, i) {
-			if (this.interaction_mode !== "comment") return;
+			this.selected_type = "comment";
 			this.selected_comment_idx = i;
 			this.comment_dragging_idx = i;
 			const box = this.comment_boxes[i];
@@ -1552,7 +1519,7 @@ export default {
 			e.preventDefault();
 		},
 		on_comment_touchstart(e, i) {
-			if (this.interaction_mode !== "comment") return;
+			this.selected_type = "comment";
 			const t = e.touches[0];
 			this.selected_comment_idx = i;
 			this.comment_dragging_idx = i;
@@ -1566,8 +1533,9 @@ export default {
 			};
 		},
 		on_comment_rotate_mousedown(e, i) {
-			if (this.interaction_mode !== "comment") return;
-			const cd = this._canvas_data;
+			// Handle is only rendered when the box is already selected
+			// (see template v-if), so no need to re-check selected_type.
+			const cd = this.canvas_data;
 			const wrapper = this.$refs.wrapper;
 			if (!cd || !wrapper) return;
 			this.selected_comment_idx = i;
@@ -1588,8 +1556,8 @@ export default {
 			e.preventDefault();
 		},
 		on_comment_resize_mousedown(e, i) {
-			if (this.interaction_mode !== "comment") return;
-			const cd = this._canvas_data;
+			// Handle is only rendered when the box is already selected.
+			const cd = this.canvas_data;
 			if (!cd) return;
 			this.selected_comment_idx = i;
 			this.comment_dragging_idx = i;
@@ -1624,7 +1592,7 @@ export default {
 				return;
 			}
 
-			const cd = this._canvas_data;
+			const cd = this.canvas_data;
 			if (!cd) return;
 
 			if (start.mode === "resize") {
@@ -2246,7 +2214,7 @@ export default {
 			// Solid + thicker when interaction is set to "Move watermark", dashed
 			// and thinner otherwise so it still marks the watermark without
 			// screaming "drag me" when the user is cropping.
-			const active = this.interaction_mode === "watermark";
+			const active = this.selected_type === "watermark";
 			ctx.strokeStyle = active ? "rgba(59, 130, 246, 0.9)" : "rgba(59, 130, 246, 0.5)";
 			ctx.lineWidth = active ? 2 : 1;
 			if (!active) ctx.setLineDash([4, 4]);
@@ -2359,20 +2327,13 @@ export default {
 			this._zoom_preserving_crop(() => this.cropper.zoomTo(1));
 		},
 
-		set_mode(mode) {
-			this.interaction_mode = mode;
-			if (this.cropper) {
-				// Disable CropperJS drag in non-crop modes so the
-				// overlay elements (watermark canvas / comment DOM
-				// boxes) can capture mouse events without the crop
-				// box stealing them.
-				if (mode === "crop") {
-					this.cropper.setDragMode("crop");
-				} else {
-					this.cropper.setDragMode("none");
-				}
-			}
-			// Repaint watermark so the corner outline picks up the new active state.
+		// Deprecated drag-mode switcher kept as a thin setter for any
+		// lingering callers. Overlay elements now capture their own
+		// events (pointer-events scoped to each box/rect), so we don't
+		// need to toggle CropperJS drag mode — it can stay on 'crop'
+		// forever; empty overlay pixels fall through to it.
+		set_mode(type) {
+			this.selected_type = type;
 			if (this.wm_enabled && this.wm_loaded) {
 				this.$nextTick(() => this.wm_draw());
 			}
@@ -2383,21 +2344,37 @@ export default {
 		// there's no meaningful drag target; users adjust tile params via
 		// sliders instead.
 		on_wrapper_mousedown(e) {
-			if (this.interaction_mode !== "watermark") return;
-			if (this.wm_mode !== "Corner") return;
-			if (!this.wm_enabled || !this.wm_loaded || !this.cropper) return;
+			// Point-to-drag model: if the mousedown lands inside the
+			// watermark-Corner rect, we claim the event (drag watermark +
+			// mark it selected). Otherwise do nothing — let the event
+			// bubble to CropperJS, which will drag/resize the crop box,
+			// and flip selected_type back to 'crop' so watermark handles
+			// hide.
+			if (!this.cropper) return;
 			const canvas = this.$refs.wm_canvas;
-			if (!canvas) return;
-			const rect = canvas.getBoundingClientRect();
-			const mx = e.clientX - rect.left;
-			const my = e.clientY - rect.top;
-			const cd = this.cropper.getCanvasData();
-			e.stopPropagation();
-			e.preventDefault();
-			this.wm_dragging = true;
-			// Offset from watermark center in container coords
-			this.wm_drag_offset_x = mx - (cd.left + (this.wm_pos_x / 100) * cd.width);
-			this.wm_drag_offset_y = my - (cd.top + (this.wm_pos_y / 100) * cd.height);
+			const wrapper = this.$refs.wrapper;
+			if (!wrapper) return;
+			const wrapperRect = wrapper.getBoundingClientRect();
+			const mx = e.clientX - wrapperRect.left;
+			const my = e.clientY - wrapperRect.top;
+
+			const can_drag_wm = this.wm_enabled && this.wm_loaded
+				&& this.wm_mode === "Corner" && canvas;
+			if (can_drag_wm && this.wm_hit_test(mx, my)) {
+				e.stopPropagation();
+				e.preventDefault();
+				this.selected_type = "watermark";
+				this.selected_comment_idx = -1;
+				const cd = this.cropper.getCanvasData();
+				this.wm_dragging = true;
+				this.wm_drag_offset_x = mx - (cd.left + (this.wm_pos_x / 100) * cd.width);
+				this.wm_drag_offset_y = my - (cd.top + (this.wm_pos_y / 100) * cd.height);
+				this.wm_draw();
+				return;
+			}
+			// No overlay element under the cursor → CropperJS takes over.
+			this.selected_type = "crop";
+			this.selected_comment_idx = -1;
 		},
 		on_wrapper_mousemove(e) {
 			if (!this.wm_dragging || !this.cropper) return;
@@ -2419,7 +2396,7 @@ export default {
 		on_wrapper_wheel(e) {
 			// Watermark Corner mode: wheel resizes the draggable logo
 			// (size %). Keep the original behaviour.
-			if (this.interaction_mode === "watermark"
+			if (this.selected_type === "watermark"
 				&& this.wm_mode === "Corner"
 				&& this.wm_enabled
 				&& this.wm_loaded) {
@@ -2438,21 +2415,30 @@ export default {
 			}
 		},
 		on_wrapper_touchstart(e) {
-			if (this.interaction_mode !== "watermark") return;
-			if (this.wm_mode !== "Corner") return;
-			if (!this.wm_enabled || !this.wm_loaded || !this.cropper) return;
+			// Mirror on_wrapper_mousedown: only claim the touch if it
+			// lands inside the watermark rect. Otherwise the touch falls
+			// through to CropperJS.
+			if (!this.cropper) return;
 			const canvas = this.$refs.wm_canvas;
-			if (!canvas) return;
+			const wrapper = this.$refs.wrapper;
+			if (!wrapper) return;
+			const can_drag_wm = this.wm_enabled && this.wm_loaded
+				&& this.wm_mode === "Corner" && canvas;
+			if (!can_drag_wm) return;
 			const touch = e.touches[0];
-			const rect = canvas.getBoundingClientRect();
-			const mx = touch.clientX - rect.left;
-			const my = touch.clientY - rect.top;
-			const cd = this.cropper.getCanvasData();
+			const wrapperRect = wrapper.getBoundingClientRect();
+			const mx = touch.clientX - wrapperRect.left;
+			const my = touch.clientY - wrapperRect.top;
+			if (!this.wm_hit_test(mx, my)) return;
 			e.stopPropagation();
 			e.preventDefault();
+			this.selected_type = "watermark";
+			this.selected_comment_idx = -1;
+			const cd = this.cropper.getCanvasData();
 			this.wm_dragging = true;
 			this.wm_drag_offset_x = mx - (cd.left + (this.wm_pos_x / 100) * cd.width);
 			this.wm_drag_offset_y = my - (cd.top + (this.wm_pos_y / 100) * cd.height);
+			this.wm_draw();
 		},
 		on_wrapper_touchmove(e) {
 			if (!this.wm_dragging || !this.cropper) return;
@@ -2494,7 +2480,7 @@ export default {
 			this.wm_mode = mode;
 			// Tiled mode has no drag target — snap back to "Adjust crop box"
 			// interaction so the cursor + wrapper state stays consistent.
-			if (mode === "Tiled" && this.interaction_mode === "watermark") {
+			if (mode === "Tiled" && this.selected_type === "watermark") {
 				this.set_mode("crop");
 			}
 			this.wm_draw();
@@ -3123,10 +3109,6 @@ img {
 	display: block;
 }
 
-.cropper-image-wrapper.wm-mode {
-	cursor: move;
-}
-
 /* While Remove BG is running, hide CropperJS's own crop-box chrome so the
    user sees just the plain image + loading overlay. The crop box is
    meaningless during this ~10-second window (auto-crop will overwrite it
@@ -3669,32 +3651,35 @@ img {
 	border-bottom: none;
 }
 
-/* Draggable comment box overlay on the cropper image (new 2026-04) */
+/* Draggable comment box overlay on the cropper image.
+   Distinct emerald palette so comment boxes don't visually collide
+   with the crop rect (blue dashed) or the watermark rect (also blue).
+   Box itself owns pointer-events: auto so clicks anywhere inside it
+   start a drag, while the surrounding .comment-overlay container stays
+   transparent to events and falls through to CropperJS. */
 .comment-overlay {
 	pointer-events: none;
 }
 .comment-overlay-box {
 	position: absolute;
-	border: 1px dashed rgba(59, 130, 246, 0.5);
+	border: 1px dashed rgba(16, 185, 129, 0.65);
 	box-sizing: border-box;
 	user-select: none;
 	display: flex;
 	align-items: flex-start;   /* text flows from top of the box, not centered */
 	justify-content: center;
 	overflow: hidden;
-	background: rgba(255, 255, 255, 0.02);
-}
-.cropper-image-wrapper.comment-mode .comment-overlay-box {
+	background: rgba(16, 185, 129, 0.04);
+	pointer-events: auto;
 	cursor: move;
-	border-color: rgba(59, 130, 246, 0.75);
-	border-style: solid;
-	background: rgba(59, 130, 246, 0.04);
 }
-.cropper-image-wrapper.comment-mode .comment-overlay-box:hover {
-	background: rgba(59, 130, 246, 0.12);
+.comment-overlay-box:hover {
+	background: rgba(16, 185, 129, 0.1);
+	border-color: rgba(16, 185, 129, 0.9);
 }
 .comment-overlay-box.selected {
-	border: 2px solid #3b82f6;
+	border: 2px solid #10b981;
+	background: rgba(16, 185, 129, 0.08);
 }
 .comment-overlay-box.dragging {
 	opacity: 0.85;
@@ -3738,7 +3723,7 @@ img {
 	width: 14px;
 	height: 14px;
 	border-radius: 3px;
-	background: #3b82f6;
+	background: #10b981;
 	border: 2px solid #fff;
 	cursor: nwse-resize;
 	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
