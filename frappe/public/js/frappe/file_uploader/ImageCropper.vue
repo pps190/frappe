@@ -1423,26 +1423,30 @@ export default {
 				this._composite_comments_on_canvas(canvas, cctx);
 			}
 
-			// If Solid Background is on, flatten the cropped canvas onto
-			// the chosen colour before encoding. Produces JPEG (opaque,
-			// smaller); otherwise keep alpha as PNG when Remove BG /
-			// Watermark ran, or fall back to the source type.
+			// Always encode as PNG. Solid Background flattens alpha onto
+			// the chosen colour (still PNG — RGB-only PNGs are typically
+			// smaller than RGBA PNGs anyway, and we avoid JPEG's lossy
+			// compression on product-edge detail). Off keeps alpha intact.
 			let final_canvas = canvas;
-			let file_type;
 			if (this.solid_background) {
 				final_canvas = this._flatten_onto_colour(canvas, this.background_color || "#FFFFFF");
-				file_type = "image/jpeg";
-			} else if (this.bg_removed || this.wm_enabled) {
-				file_type = "image/png";
-			} else {
-				file_type = this.file.file_obj.type;
 			}
+			const file_type = "image/png";
 
 			final_canvas.toBlob((blob) => {
-				let name = this.file.name;
-				if (this.bg_removed) name = name.replace(/\.[^.]+$/, "_nobg.png");
-				if (this.wm_enabled) name = name.replace(/\.[^.]+$/, "_wm.png");
-				if (this.solid_background) name = name.replace(/\.[^.]+$/, ".jpg");
+				// Build a single new filename: stem + active-suffixes + .png.
+				// Using `.replace(/\.[^.]+$/, ...)` repeatedly eats
+				// previously-added suffixes — e.g. foo.jpg → foo_nobg.png
+				// → foo_wm.png (the _nobg disappears). Compose the stem
+				// once and append all active suffixes together instead.
+				const original = this.file.name || "image.png";
+				const dot = original.lastIndexOf(".");
+				const stem = dot > 0 ? original.slice(0, dot) : original;
+				const suffixes = [];
+				if (this.bg_removed) suffixes.push("_nobg");
+				if (this.wm_enabled) suffixes.push("_wm");
+				if (this.solid_background) suffixes.push("_bg");
+				const name = stem + suffixes.join("") + ".png";
 				this.file.file_obj = new File([blob], name, { type: blob.type });
 				this.file.name = name;
 				// Emit the final settings snapshot so FileUploader's Step 3
@@ -1479,7 +1483,7 @@ export default {
 					background_color: this.background_color,
 				});
 				this.$emit("toggle_image_cropper");
-			}, file_type, file_type === "image/jpeg" ? 0.92 : undefined);
+			}, file_type);
 		},
 
 		// Paint `src` on top of a solid-colour fill canvas of the same
