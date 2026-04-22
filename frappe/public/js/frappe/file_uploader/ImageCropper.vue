@@ -1410,8 +1410,27 @@ export default {
 					remove_bg: !!this.bg_removed,
 					watermark_enabled: !!this.wm_enabled,
 					watermark_mode: this.wm_mode,
+					// Full watermark state so re-opening the cropper
+					// after Step 3 restores opacity / size / position /
+					// rotation / tile params instead of resetting to
+					// Settings defaults.
+					watermark_state: {
+						mode: this.wm_mode,
+						position_x: this.wm_pos_x,
+						position_y: this.wm_pos_y,
+						size: this.wm_size,
+						opacity: this.wm_opacity,
+						corner_rotation: this.wm_corner_rotation,
+						tile_size: this.wm_tile_size,
+						tile_opacity: this.wm_tile_opacity,
+						tile_rotation: this.wm_tile_rotation,
+						tile_spacing: this.wm_tile_spacing,
+					},
 					comments_enabled: !!this.comments_enabled,
 					comment_count: (this.comment_boxes || []).length,
+					// Deep-clone so FileUploader can mutate without
+					// reaching back into the cropper's reactive state.
+					comment_boxes: (this.comment_boxes || []).map((b) => ({ ...b })),
 					crop_aspect: this._aspect_number_to_string(this.aspect_ratio),
 					solid_background: !!this.solid_background,
 					background_color: this.background_color,

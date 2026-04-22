@@ -263,6 +263,25 @@
 									: __("off") }}
 							</span>
 						</li>
+						<li>
+							<span class="fu-recap-dot on"></span>
+							<span class="fu-recap-label">{{ __("Crop ratio") }}</span>
+							<span class="fu-recap-value">{{ recap.crop_aspect || "Free" }}</span>
+						</li>
+						<li :class="{ off: !recap.solid_background }">
+							<span class="fu-recap-dot" :class="recap.solid_background ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Solid background") }}</span>
+							<span class="fu-recap-value">
+								<template v-if="recap.solid_background">
+									<span
+										class="fu-recap-swatch"
+										:style="{ backgroundColor: recap.background_color || '#FFFFFF' }"
+									></span>
+									{{ recap.background_color || "#FFFFFF" }}
+								</template>
+								<template v-else>{{ __("off") }}</template>
+							</span>
+						</li>
 					</ul>
 				</div>
 			</template>
@@ -484,9 +503,9 @@
 			:show_remove_bg="show_remove_bg && !remove_bg_disabled_hint"
 			:remove_bg_checked="remove_bg_checked"
 			:remove_bg_padding_pct="step1_padding_pct"
-			:default_crop_aspect="default_crop_aspect"
-			:default_solid_background="default_solid_background"
-			:default_background_color="default_background_color"
+			:default_crop_aspect="local_crop_aspect"
+			:default_solid_background="local_solid_background"
+			:default_background_color="local_background_color"
 			:show_watermark="show_watermark"
 			:watermark_settings="local_watermark_settings"
 			:wm_default_enabled="wm_enabled"
@@ -687,6 +706,14 @@ export default {
 			local_comment_defaults: this.comment_defaults
 				? JSON.parse(JSON.stringify(this.comment_defaults))
 				: null,
+			// Local mirrors of the three Crop-toolbar defaults so we can
+			// update them after every @crop_committed — reopening the
+			// cropper then seeds the toolbar with what the user last
+			// committed, not the original prop value. Props are read-only
+			// in Vue 2, so we need the local copy.
+			local_crop_aspect: this.default_crop_aspect || "Free",
+			local_solid_background: !!this.default_solid_background,
+			local_background_color: this.default_background_color || "#FFFFFF",
 		};
 	},
 	created() {
@@ -757,6 +784,12 @@ export default {
 				comments_enabled: s.comments_enabled != null ? s.comments_enabled : this.comments_enabled_default,
 				comment_count: s.comment_count || 0,
 				crop_aspect: s.crop_aspect || this.default_crop_aspect || "Free",
+				solid_background: s.solid_background != null
+					? s.solid_background
+					: !!this.default_solid_background,
+				background_color: s.background_color
+					|| this.default_background_color
+					|| "#FFFFFF",
 			};
 		},
 		// Tab objects used by the v-for in the template. Each entry knows
@@ -808,13 +841,42 @@ export default {
 		_on_crop_committed(snapshot) {
 			this.last_crop_settings = snapshot;
 			// Keep Step 1 / recap toggle dots in sync with the cropper's
-			// final state so a user clicking Back sees what they last
-			// committed, not the pre-crop defaults.
+			// final state so a user clicking Back (or Crop again after
+			// the cropper re-mounts) sees what they last committed, not
+			// the pre-crop defaults.
 			this.remove_bg_checked = !!snapshot.remove_bg;
 			this.wm_enabled = !!snapshot.watermark_enabled;
 			this.comments_enabled_default = !!snapshot.comments_enabled;
-			if (this.local_watermark_settings && snapshot.watermark_mode) {
+			// Watermark: merge the full per-slider state into the local
+			// settings object so re-opening the cropper restores exactly
+			// what the user tuned (opacity / size / position / mode / etc.).
+			if (this.local_watermark_settings && snapshot.watermark_state) {
+				const ws = snapshot.watermark_state;
+				Object.keys(ws).forEach((k) => {
+					if (ws[k] != null) {
+						this.$set(this.local_watermark_settings, k, ws[k]);
+					}
+				});
+			} else if (this.local_watermark_settings && snapshot.watermark_mode) {
 				this.$set(this.local_watermark_settings, "mode", snapshot.watermark_mode);
+			}
+			// Comments: carry the full edited box list forward so the next
+			// cropper mount seeds via initial_comment_boxes with what the
+			// user actually wrote, not the original preset library.
+			if (Array.isArray(snapshot.comment_boxes)) {
+				this.step1_comment_boxes = snapshot.comment_boxes.map((b) => ({ ...b }));
+			}
+			// Carry the Crop-toolbar state forward. Without this, reopening
+			// the cropper after Step 3 would reset aspect / solid bg /
+			// colour back to the original Settings-seeded prop values.
+			if (snapshot.crop_aspect) {
+				this.local_crop_aspect = snapshot.crop_aspect;
+			}
+			if (snapshot.solid_background != null) {
+				this.local_solid_background = !!snapshot.solid_background;
+			}
+			if (snapshot.background_color) {
+				this.local_background_color = snapshot.background_color;
 			}
 		},
 		_set_wm_field(field, value) {
@@ -1701,6 +1763,17 @@ export default {
 	text-transform: uppercase;
 	letter-spacing: 0.03em;
 	font-weight: 500;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+.fu-recap-swatch {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
+	border: 1px solid #cbd5e1;
+	flex-shrink: 0;
 }
 
 /* ── Mobile: stack right column below left ─────────────────────── */
