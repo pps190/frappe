@@ -65,6 +65,20 @@
 					</div>
 				</div>
 
+				<!-- Zoom group — viewMode:0 lets the crop box extend past the
+				     image, so users need explicit zoom controls to zoom out
+				     and see the working area around the picture. Wheel +
+				     pinch are also active on the stage. -->
+				<div class="cropper-toolbar-group">
+					<span class="cropper-toolbar-label">{{ __("Zoom") }}:</span>
+					<div class="btn-group btn-group-sm">
+						<button type="button" class="btn btn-default btn-sm" :title="__('Zoom out')" @click="zoom_by(-0.1)">−</button>
+						<button type="button" class="btn btn-default btn-sm" :title="__('Fit to workspace')" @click="zoom_fit">{{ __("Fit") }}</button>
+						<button type="button" class="btn btn-default btn-sm" :title="__('Actual size 1:1')" @click="zoom_actual">1:1</button>
+						<button type="button" class="btn btn-default btn-sm" :title="__('Zoom in')" @click="zoom_by(0.1)">+</button>
+					</div>
+				</div>
+
 				<!-- Preview block inline in the toolbar, right-aligned via
 				     margin-left: auto so the full toolbar height stays
 				     compact (~50px, determined by the taller segmented
@@ -115,7 +129,6 @@
 						'comment-mode': interaction_mode === 'comment',
 						'bg-processing': bg_processing,
 					}"
-					:style="wrapper_aspect_style"
 					@mousedown="on_wrapper_mousedown"
 					@wheel.prevent="on_wrapper_wheel"
 					@touchstart="on_wrapper_touchstart"
@@ -777,11 +790,6 @@ export default {
 			// Canvas data cache (image display rect in cropper wrapper)
 			// updated on cropper ready + crop event for overlay positioning.
 			_canvas_data: null,
-			// Natural aspect ratio (w/h) of the source image, driven by the
-			// <img @load> handler. Used to size .cropper-image-wrapper to
-			// exactly the picture's contain-bbox so the crop box can't be
-			// dragged into empty dead-zones.
-			natural_aspect_ratio: null,
 			comment_font_families: [
 				"Arial", "Helvetica", "Times New Roman",
 				"Courier New", "Georgia", "Verdana",
@@ -814,10 +822,11 @@ export default {
 			this._schedule_preview_update();
 			this.$emit("resize_enabled_changed", !!v);
 		},
-		comments_enabled(v) {
-			this._schedule_preview_update();
-			this.$emit("comments_enabled_changed", !!v);
-		},
+		// Merged with the duplicate comments_enabled() below to preserve
+		// the $emit (Vue keeps only the last-declared watcher of the same
+		// key). Without this, FileUploader.comments_enabled_default never
+		// re-syncs with the cropper's toggle.
+
 		resize_aspect() { this._schedule_preview_update(); },
 		resize_mode() { this._schedule_preview_update(); },
 		resize_fill_color() { this._schedule_preview_update(); },
@@ -859,7 +868,10 @@ export default {
 				this.$nextTick(() => this._schedule_preview_update());
 			}
 		},
-		comments_enabled() { this._schedule_preview_update(); },
+		comments_enabled(v) {
+			this._schedule_preview_update();
+			this.$emit("comments_enabled_changed", !!v);
+		},
 		comment_boxes: {
 			handler() { this._schedule_preview_update(); },
 			deep: true,
@@ -1071,15 +1083,6 @@ export default {
 		}
 	},
 	computed: {
-		// CSS binding that sizes .cropper-image-wrapper to the source image's
-		// natural aspect ratio. Combined with max-width/max-height:100% in
-		// the stylesheet this gives a perfect contain-fit inside the stage,
-		// so the wrapper box edge == the image edge (no grey dead-zone the
-		// crop box can't reach).
-		wrapper_aspect_style() {
-			if (!this.natural_aspect_ratio) return {};
-			return { aspectRatio: String(this.natural_aspect_ratio) };
-		},
 		aspect_ratio_buttons() {
 			return [
 				{ label: __("1:1"), value: 1 },
@@ -1157,15 +1160,10 @@ export default {
 		},
 	},
 	methods: {
-		// Capture the source image's natural aspect ratio so the wrapper
-		// box (which CropperJS mounts on) sizes exactly to the image's
-		// contain-fit rect. Runs before init_cropper because CropperJS
-		// reads the container size once on mount.
-		on_image_load(e) {
-			const img = e && e.target;
-			if (img && img.naturalWidth && img.naturalHeight) {
-				this.natural_aspect_ratio = img.naturalWidth / img.naturalHeight;
-			}
+		on_image_load() {
+			// Kept as a no-op template handler hook in case downstream
+			// subclasses want to observe natural size. CropperJS re-reads
+			// naturalWidth/Height on its own ready callback.
 		},
 		// ── Image loading ──
 		load_image(file) {
@@ -1182,24 +1180,21 @@ export default {
 			if (this.cropper) this.cropper.destroy();
 			let crop_box = this.file.crop_box_data;
 			this.image = this.$refs.image;
-			// Ensure the wrapper aspect ratio is set before CropperJS mounts —
-			// CropperJS reads the container size once, so a stale wrapper box
-			// leaves dead space around the picture. Vue's @load usually fires
-			// this, but for fast data URL decodes the browser may skip the
-			// load event if the image is already complete in cache.
-			if (
-				this.image &&
-				this.image.naturalWidth &&
-				this.image.naturalHeight
-			) {
-				this.natural_aspect_ratio =
-					this.image.naturalWidth / this.image.naturalHeight;
-			}
 			this.image.onload = () => {
 				this.cropper = new Cropper(this.image, {
-					zoomable: false,
+					// viewMode 0: crop box may extend beyond the image edges —
+					// the standard Photoshop/Photopea/Lightroom workspace where
+					// the image floats in a larger canvas. Needed for Remove BG
+					// + padding (auto-crop can expand past image bounds) and for
+					// "Save with Canvas" that deliberately adds transparent
+					// margins around the product.
+					viewMode: 0,
+					zoomable: true,
 					scalable: false,
-					viewMode: 1,
+					zoomOnTouch: true,
+					zoomOnWheel: true,
+					wheelZoomRatio: 0.1,
+					autoCropArea: 1,
 					data: crop_box,
 					aspectRatio: this.aspect_ratio,
 					ready: () => {
@@ -1307,67 +1302,12 @@ export default {
 		// ── Crop ──
 		crop_image() {
 			const crop_data = this.cropper.getData();
-			const image_data = this.cropper.getImageData();
 			this.file.crop_box_data = crop_data;
 			const canvas = this.cropper.getCroppedCanvas();
 
 			if (this.wm_enabled && this.wm_loaded && this.wm_img) {
 				const ctx = canvas.getContext("2d");
-				const cw = canvas.width;
-				const ch = canvas.height;
-				const full_w = image_data.naturalWidth;
-				const full_h = image_data.naturalHeight;
-				const crop_x = crop_data.x;
-				const crop_y = crop_data.y;
-				const crop_w = crop_data.width;
-				const crop_h = crop_data.height;
-				const scale_x = cw / crop_w;
-				const scale_y = ch / crop_h;
-
-				if (this.wm_mode === "Tiled") {
-					// Tiled watermark on cropped canvas
-					const tile_w = (this.wm_tile_size / 100) * full_w * scale_x;
-					const tile_h = tile_w * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
-					const spacing_x = (this.wm_tile_spacing / 100) * full_w * scale_x;
-					const spacing_y = (this.wm_tile_spacing / 100) * full_h * scale_y;
-					const step_x = tile_w + spacing_x;
-					const step_y = tile_h + spacing_y;
-					const angle = (this.wm_tile_rotation * Math.PI) / 180;
-
-					ctx.save();
-					ctx.globalAlpha = this.wm_tile_opacity / 100;
-					ctx.translate(cw / 2, ch / 2);
-					ctx.rotate(angle);
-					const diag = Math.sqrt(cw * cw + ch * ch);
-					for (let y = -diag; y < diag; y += step_y) {
-						for (let x = -diag; x < diag; x += step_x) {
-							ctx.drawImage(this.wm_img, x, y, tile_w, tile_h);
-						}
-					}
-					ctx.restore();
-				} else {
-					// Corner watermark
-					const wm_center_x = (this.wm_pos_x / 100) * full_w;
-					const wm_center_y = (this.wm_pos_y / 100) * full_h;
-					const wm_w_full = (this.wm_size / 100) * full_w;
-					const wm_h_full = wm_w_full * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
-					const draw_x = (wm_center_x - wm_w_full / 2 - crop_x) * scale_x;
-					const draw_y = (wm_center_y - wm_h_full / 2 - crop_y) * scale_y;
-					const draw_w = wm_w_full * scale_x;
-					const draw_h = wm_h_full * scale_y;
-					const rot = (this.wm_corner_rotation || 0) * Math.PI / 180;
-					ctx.save();
-					ctx.globalAlpha = this.wm_opacity / 100;
-					if (rot) {
-						const cx = draw_x + draw_w / 2;
-						const cy = draw_y + draw_h / 2;
-						ctx.translate(cx, cy);
-						ctx.rotate(rot);
-						ctx.translate(-cx, -cy);
-					}
-					ctx.drawImage(this.wm_img, draw_x, draw_y, draw_w, draw_h);
-					ctx.restore();
-				}
+				this._composite_watermark_on_canvas(canvas, ctx);
 			}
 
 			// ── Comments step (new 2026-04) ──
@@ -1775,15 +1715,27 @@ export default {
 		// whitelisted endpoint. Matches the Save as Default button
 		// on Remove BG / Watermark / Canvas tabs.
 		_save_comments_panel() {
+			const presets_snapshot = (this.comment_boxes || []).map((b) => ({ ...b }));
+			const enabled_snapshot = this.comments_enabled ? 1 : 0;
 			frappe.call({
 				method: "next.next.doctype.image_processing_settings.image_processing_settings.update_comment_presets",
 				args: {
-					presets_json: JSON.stringify(this.comment_boxes || []),
-					enabled: this.comments_enabled ? 1 : 0,
+					presets_json: JSON.stringify(presets_snapshot),
+					enabled: enabled_snapshot,
 				},
 				callback: () => {
+					// Refresh the client-side settings cache used by item.js
+					// so the next time the uploader opens, Comments comes up
+					// with the new enabled state + preset list. Without this,
+					// the cache keeps serving the pre-save snapshot and the
+					// user sees the toggle revert on reopen — especially
+					// confusing when the preset list is empty but enabled.
+					if (frappe._image_processing_settings_cache) {
+						frappe._image_processing_settings_cache.default_comments_enabled = !!enabled_snapshot;
+						frappe._image_processing_settings_cache.comment_presets = presets_snapshot;
+					}
 					frappe.show_alert({
-						message: __("Saved {0} comments as default", [this.comment_boxes.length]),
+						message: __("Saved {0} comments as default", [presets_snapshot.length]),
 						indicator: "green",
 					});
 				},
@@ -2314,6 +2266,23 @@ export default {
 			const cd = this.cropper.getCanvasData();
 			const r = this.wm_get_rect_in_container(cd);
 			return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h;
+		},
+
+		// ── Zoom controls (viewMode:0 workspace) ──
+		// cropper.zoom(ratio) is relative (delta); zoomTo(absolute) sets
+		// display/natural. "Fit" recenters + fits the image into the
+		// container via cropper.reset(), matching the initial mount state.
+		zoom_by(delta) {
+			if (!this.cropper) return;
+			this.cropper.zoom(delta);
+		},
+		zoom_fit() {
+			if (!this.cropper) return;
+			this.cropper.reset();
+		},
+		zoom_actual() {
+			if (!this.cropper) return;
+			this.cropper.zoomTo(1);
 		},
 
 		set_mode(mode) {
@@ -3015,13 +2984,12 @@ img {
 }
 
 /* Two-level cropper layout.
-   .cropper-image-stage — the dark flex-filling backdrop (shows around
-     the picture when the workspace aspect differs from the image).
-   .cropper-image-wrapper — sized to the image's natural aspect ratio
-     via :style="wrapper_aspect_style" so its bounding rect matches the
-     actual image display rect. CropperJS mounts on this, so the crop
-     box's bounds equal the image edges — no grey dead-zone the box
-     can't reach. Matches Photoshop / Figma / Lightroom behaviour. */
+   .cropper-image-stage — dark flex-filling backdrop (the "artboard").
+   .cropper-image-wrapper — fills the stage; CropperJS mounts on the
+     <img> inside and takes over rendering (image centered, checkerboard
+     background showing through transparent pixels, zoomable workspace).
+     With viewMode:0 the crop box can extend beyond the image into the
+     working area — matching Photoshop / Photopea / Lightroom behaviour. */
 .cropper-image-stage {
 	position: relative;
 	flex: 1 1 auto;
@@ -3037,30 +3005,12 @@ img {
 }
 .cropper-image-wrapper {
 	position: relative;
-	max-width: 100%;
-	max-height: 100%;
-	/* aspect-ratio is applied inline via wrapper_aspect_style. Until the
-	   <img @load> handler fires (first paint / SSR-like state) fall back
-	   to 1 so the empty box has a sane shape. */
-	aspect-ratio: 1;
 	width: 100%;
 	height: 100%;
+	min-width: 0;
+	min-height: 0;
 	overflow: hidden;
 	border-radius: 4px;
-	/* Subtle checkerboard shows through transparent PNGs so the user can
-	   see "this area is transparent" instead of guessing from grey. */
-	background-color: #fdfdfd;
-	background-image:
-		linear-gradient(45deg, #e9edf2 25%, transparent 25%),
-		linear-gradient(-45deg, #e9edf2 25%, transparent 25%),
-		linear-gradient(45deg, transparent 75%, #e9edf2 75%),
-		linear-gradient(-45deg, transparent 75%, #e9edf2 75%);
-	background-size: 16px 16px;
-	background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
-	/* Distinct border so the image's edge is visually obvious — the
-	   crop box stops exactly here. */
-	box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18),
-		0 4px 18px rgba(0, 0, 0, 0.35);
 }
 .cropper-image-wrapper img {
 	max-width: 100%;
