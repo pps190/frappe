@@ -498,7 +498,7 @@
 						</div>
 						<div v-if="resize_enabled_default && local_resize_settings" class="adjustments-row">
 							<label class="adjustments-field-label">{{ __("Aspect") }}</label>
-							<div class="segmented-tabs" role="tablist">
+							<div class="segmented-tabs segmented-tabs-aspect" role="tablist">
 								<button v-for="opt in ['1:1', '4:3', '16:9', '3:2', '2:3', 'Free']" :key="opt"
 									type="button" class="segmented-tab"
 									:class="{ active: (local_resize_settings.resize_aspect || '1:1') === opt }"
@@ -1664,6 +1664,18 @@ export default {
 	background: var(--primary);
 	color: #fff;
 	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* Aspect row has 6 options — shrink padding so all fit on one line at the
+   ~380px right-panel width instead of wrapping "Free" to a new row. */
+.file-uploader .segmented-tabs-aspect {
+	display: grid;
+	grid-template-columns: repeat(6, 1fr);
+}
+.file-uploader .segmented-tabs-aspect .segmented-tab {
+	padding: 8px 0;
+	justify-content: center;
+	font-size: 13px;
 }
 
 /* Row of inline check/color fields (B / I / Color ▣ / Solid BG ☑) */

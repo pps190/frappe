@@ -2756,6 +2756,9 @@ img {
 .canvas-segmented .segmented-tab {
 	flex: 1 0 auto;
 	min-width: 48px;
+	padding: 7px 0;
+	justify-content: center;
+	font-size: 13px;
 }
 .canvas-misc-row {
 	display: flex;
