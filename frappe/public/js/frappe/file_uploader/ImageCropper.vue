@@ -119,9 +119,11 @@
 						@mousedown.stop="on_comment_mousedown($event, i)"
 						@touchstart.stop="on_comment_touchstart($event, i)"
 					>
-						<div class="comment-overlay-text" :style="comment_text_style(box)">
-							{{ box.text || __('(empty)') }}
-						</div>
+						<!-- Span instead of div so the text is truly inline and
+						     shrink-wraps to content. Must be on one line in the
+						     template too, otherwise white-space: pre-wrap would
+						     include the template's indentation whitespace. -->
+						<span class="comment-overlay-text" :style="comment_text_style(box)">{{ box.text || __('(empty)') }}</span>
 						<div
 							v-if="selected_comment_idx === i && selected_type === 'comment'"
 							class="comment-rotate-handle"
@@ -397,7 +399,7 @@
 									+ {{ __("Add") }}
 								</button>
 								<button
-									v-if="comment_presets && comment_presets.length"
+									v-if="effective_comment_presets.length"
 									type="button"
 									class="btn btn-xs btn-default"
 									@click="_toggle_preset_menu()"
@@ -406,7 +408,7 @@
 								</button>
 								<div v-if="preset_menu_open" class="comment-preset-menu">
 									<div
-										v-for="(p, pi) in comment_presets"
+										v-for="(p, pi) in effective_comment_presets"
 										:key="'preset-' + pi"
 										class="comment-preset-item"
 										@click="_insert_preset(p)"
@@ -523,10 +525,16 @@
 								</label>
 								<label class="comment-control">
 									<span>{{ __("Rotate °") }}</span>
-									<input type="number" class="wm-input comment-num-input"
+									<input type="number" class="wm-input comment-num-input scrubber-input"
 										min="-180" max="180" step="5"
 										:value="Math.round(box.rotation_deg || 0)"
+										:title="__('Type a value, or click & drag left/right to scrub.')"
 										@input="_update_comment(i, 'rotation_deg', parseFloat($event.target.value) || 0)"
+										@mousedown="_scrub_start($event, {
+											get: () => box.rotation_deg || 0,
+											set: (v) => _update_comment(i, 'rotation_deg', v),
+											step: 1, min: -180, max: 180,
+										})"
 									/>
 								</label>
 							</div>
@@ -754,6 +762,11 @@ export default {
 			selected_comment_idx: -1,
 			comment_dragging_idx: -1,
 			_comment_drag_start: null,
+			// Local override of the comment_presets prop. Props are one-way,
+			// so after "Save as Default" writes a new preset list on the
+			// server we mirror it here and read via `effective_comment_presets`
+			// so the Presets dropdown refreshes without re-opening the dialog.
+			local_comment_presets: null,
 			// Canvas data cache (image display rect in cropper wrapper)
 			// updated on cropper ready + crop event for overlay positioning.
 			// NB: no leading underscore — Vue 2 skips reactivity proxying for
@@ -1069,6 +1082,14 @@ export default {
 			if (this.local_padding_pct != null) return this.local_padding_pct;
 			const p = Number(this.remove_bg_padding_pct);
 			return Number.isFinite(p) ? p : 2;
+		},
+
+		// Preset list used by the Presets dropdown. Prefers the local copy
+		// set by "Save as Default" (so the dropdown refreshes live) over
+		// the one-way prop from the parent (which is frozen at dialog open).
+		effective_comment_presets() {
+			if (Array.isArray(this.local_comment_presets)) return this.local_comment_presets;
+			return this.comment_presets || [];
 		},
 
 		// Comment overlay sits on top of the image display area (NOT
@@ -1705,14 +1726,15 @@ export default {
 				callback: () => {
 					// Refresh the client-side settings cache used by item.js
 					// so the next time the uploader opens, Comments comes up
-					// with the new enabled state + preset list. Without this,
-					// the cache keeps serving the pre-save snapshot and the
-					// user sees the toggle revert on reopen — especially
-					// confusing when the preset list is empty but enabled.
+					// with the new enabled state + preset list.
 					if (frappe._image_processing_settings_cache) {
 						frappe._image_processing_settings_cache.default_comments_enabled = !!enabled_snapshot;
 						frappe._image_processing_settings_cache.comment_presets = presets_snapshot;
 					}
+					// Also mirror into our local override so the Presets
+					// dropdown in THIS dialog picks up the change without
+					// reopening — the `comment_presets` prop is one-way.
+					this.local_comment_presets = presets_snapshot.map((p) => ({ ...p }));
 					frappe.show_alert({
 						message: __("Saved {0} comments as default", [presets_snapshot.length]),
 						indicator: "green",
@@ -1722,11 +1744,12 @@ export default {
 		},
 
 		// Reset the panel — replace box list with the current
-		// comment_presets prop (which is the singleton's saved list).
+		// effective_comment_presets (local override if any, else prop).
 		// Also flips the enable toggle back to the saved default.
 		_reset_comments_panel() {
-			this.comment_boxes = Array.isArray(this.comment_presets)
-				? this.comment_presets.map((p) => ({ ...p }))
+			const src = this.effective_comment_presets;
+			this.comment_boxes = Array.isArray(src)
+				? src.map((p) => ({ ...p }))
 				: [];
 			this.selected_comment_idx = -1;
 			this.comments_enabled = !!this.comments_default_enabled;
@@ -1786,6 +1809,39 @@ export default {
 			if (!current) return;
 			this.$set(this.comment_boxes, i, { ...current, [field]: value });
 		},
+
+		// Figma/Blender-style scrubber: click a number input and drag
+		// left/right (without releasing) to change its value. Releasing
+		// the drag still lets the user type normally. One px = one step.
+		_scrub_start(e, opts) {
+			if (e.button !== 0) return;
+			const startX = e.clientX;
+			const startV = Number(opts.get()) || 0;
+			let moved = false;
+			const onMove = (me) => {
+				const dx = me.clientX - startX;
+				if (!moved && Math.abs(dx) < 3) return;
+				moved = true;
+				// Prevent text selection + browser drag while scrubbing
+				me.preventDefault();
+				let v = startV + dx * (opts.step || 1);
+				if (opts.min != null) v = Math.max(opts.min, v);
+				if (opts.max != null) v = Math.min(opts.max, v);
+				opts.set(Math.round(v));
+				document.body.style.cursor = "ew-resize";
+			};
+			const onUp = () => {
+				document.removeEventListener("mousemove", onMove);
+				document.removeEventListener("mouseup", onUp);
+				document.body.style.cursor = "";
+				// If the user actually dragged, blur the input so the
+				// focus ring doesn't linger — feels more like a handle,
+				// less like an edit session.
+				if (moved) e.target.blur();
+			};
+			document.addEventListener("mousemove", onMove);
+			document.addEventListener("mouseup", onUp);
+		},
 		_delete_comment(i) {
 			this.comment_boxes.splice(i, 1);
 		},
@@ -1812,79 +1868,87 @@ export default {
 		// Paint all enabled comment boxes onto the cropped canvas. Called
 		// after watermark compositing, before aspect normalize, so boxes
 		// stay attached to content (not Contain-padded fill strips).
-		// Mirrors the server-side _apply_comment_boxes in item_image_batch.py.
+		// Mirrors server-side _apply_comment_boxes exactly. Canvas passed
+		// in is the CROPPED image (cropper.getCroppedCanvas()), so its
+		// width/height already equal the natural crop size — the same
+		// tensor the server works on post-crop. That means we can use
+		// the server's formulas as-is (w/h = canvas size), with a single
+		// extra step: subtract crop_x/crop_y when projecting the box's
+		// full-image-relative position to the cropped canvas origin.
 		_composite_comments_on_canvas(canvas, ctx) {
 			if (!this.comment_boxes || this.comment_boxes.length === 0) return;
+			const image_data = this.cropper && this.cropper.getImageData();
+			const crop_data = this.cropper && this.cropper.getData();
+			if (!image_data || !crop_data) return;
 			const w = canvas.width;
 			const h = canvas.height;
+			const full_w = image_data.naturalWidth;
+			const full_h = image_data.naturalHeight;
+
 			for (const box of this.comment_boxes) {
 				if (!box.text) continue;
+				// Font size formula = server's: h (cropped image height) × pct.
 				const font_size_px = Math.max(1, Math.round(h * (box.font_size_pct || 5.0) / 100));
 				const family = box.font_family || "Arial";
 				const weight = box.font_weight === "Bold" ? "bold" : "normal";
 				const style = box.font_style === "Italic" ? "italic" : "normal";
 				ctx.font = `${style} ${weight} ${font_size_px}px "${family}", sans-serif`;
 				ctx.fillStyle = box.color || "#000000";
+				ctx.textBaseline = "top";
 
-				const cx = w * (box.position_x_pct || 50) / 100;
-				const cy = h * (box.position_y_pct || 50) / 100;
-				const box_w_px = w * (box.width_pct || 40) / 100;
+				// Box position is % of the FULL image (not the crop). Project
+				// to the cropped canvas by subtracting crop_x/crop_y.
+				const width_pct = box.width_pct || 40;
+				const height_pct = box.height_pct || 10;
+				const box_left = full_w * ((box.position_x_pct || 50) - width_pct / 2) / 100 - crop_data.x;
+				const box_top = full_h * ((box.position_y_pct || 50) - height_pct / 2) / 100 - crop_data.y;
+
+				// Padding formula = server's (pad_x = w*4/1000 floor 4,
+				// pad_y = h*2/1000 floor 2). But w/h on the server are the
+				// CROPPED image's width/height, which equals our canvas
+				// size here — so use w/h directly.
+				const pad_x = Math.max(4, w * 4 / 1000);
+				const pad_y = Math.max(2, h * 2 / 1000);
+
 				const rotation_deg = box.rotation_deg || 0;
+				const lines = String(box.text || "").split("\n");
+				if (!lines.length) continue;
 
-				// Simple greedy word-wrap (same intent as _wrap_to_width on server)
-				const lines = this._wrap_text_to_width(
-					String(box.text || ""), box_w_px, ctx
-				);
+				// PIL text uses ascent-to-descent metrics; getbbox gives
+				// tight bounds. Canvas fillText with textBaseline: "top"
+				// uses the font-metrics top, which includes the ascent.
+				// Close enough for preview — visual offset within ±1 px.
 				const line_h = font_size_px * 1.2;
-				const total_h = lines.length * line_h;
 
-				// Rotate around box center (cx, cy). Matches CSS transform-origin 50% 50%
-				// on the overlay box and PIL's rotate(-angle, expand=True) + alpha_composite
-				// which keeps text centered on (cx, cy) after rotation.
+				ctx.save();
+				// Rotate around box top-left — matches server rotate(center=(0,0))
+				// + paste at box origin.
 				const needs_rotate = Math.abs(rotation_deg) > 0.001;
 				if (needs_rotate) {
-					ctx.save();
-					ctx.translate(cx, cy);
+					ctx.translate(box_left, box_top);
 					ctx.rotate((rotation_deg * Math.PI) / 180);
-					ctx.translate(-cx, -cy);
+					ctx.translate(-box_left, -box_top);
 				}
 
-				let y_cursor = cy - total_h / 2 + line_h * 0.75;
+				const max_line_w = lines.reduce(
+					(m, ln) => Math.max(m, ctx.measureText(ln || " ").width), 0
+				);
+				let y_cursor = box_top + pad_y;
 				for (const line of lines) {
-					const line_w = ctx.measureText(line).width;
+					const line_w = ctx.measureText(line || " ").width;
 					let x;
-					if (box.align === "Left") x = cx - box_w_px / 2;
-					else if (box.align === "Right") x = cx + box_w_px / 2 - line_w;
-					else x = cx - line_w / 2;
+					if (box.align === "Right") {
+						x = box_left + pad_x + max_line_w - line_w;
+					} else if (box.align === "Center") {
+						x = box_left + pad_x + (max_line_w - line_w) / 2;
+					} else {
+						x = box_left + pad_x;
+					}
 					ctx.fillText(line, x, y_cursor);
 					y_cursor += line_h;
 				}
-
-				if (needs_rotate) {
-					ctx.restore();
-				}
+				ctx.restore();
 			}
-		},
-
-		_wrap_text_to_width(text, max_width_px, ctx) {
-			if (!text) return [];
-			const out = [];
-			for (const paragraph of text.split("\n")) {
-				if (!paragraph) { out.push(""); continue; }
-				const words = paragraph.split(" ");
-				let line = "";
-				for (const word of words) {
-					const candidate = line ? `${line} ${word}` : word;
-					if (ctx.measureText(candidate).width <= max_width_px || !line) {
-						line = candidate;
-					} else {
-						out.push(line);
-						line = word;
-					}
-				}
-				if (line) out.push(line);
-			}
-			return out;
 		},
 
 		// ── Live preview (new 2026-04) ──
@@ -1996,12 +2060,6 @@ export default {
 			const scale_y = ch / crop_h;
 
 			if (this.wm_mode === "Tiled") {
-				// Tile size & spacing are a % of the source image's natural
-				// width, then scaled into output-canvas pixels via scale_x.
-				// Matches the overlay which anchors to getCanvasData (=
-				// naturalWidth × zoom) → WYSIWYG. Crop size and padding
-				// don't change tile dimensions; they just open a different
-				// window onto the same pattern.
 				const tile_w_natural = (this.wm_tile_size / 100) * full_w;
 				const tile_h_natural = tile_w_natural * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
 				const spacing_natural = (this.wm_tile_spacing / 100) * full_w;
@@ -2010,10 +2068,6 @@ export default {
 				const step_x = tile_w + spacing_natural * scale_x;
 				const step_y = tile_h + spacing_natural * scale_y;
 				const angle = (this.wm_tile_rotation * Math.PI) / 180;
-				// Pattern origin = center of the full source image projected
-				// into output coords. Keeps tile phase stable across crops
-				// (move the crop box → same tile positions relative to the
-				// image, not re-centered to the crop).
 				const origin_x = (full_w / 2 - crop_x) * scale_x;
 				const origin_y = (full_h / 2 - crop_y) * scale_y;
 				ctx.save();
@@ -2027,9 +2081,13 @@ export default {
 					Math.max(origin_y, ch - origin_y) ** 2
 				);
 				const reach = max_dist + Math.max(tile_w, tile_h);
-				for (let y = -reach; y < reach; y += step_y) {
-					for (let x = -reach; x < reach; x += step_x) {
-						ctx.drawImage(this.wm_img, x, y, tile_w, tile_h);
+				// Step-aligned loop: matches the overlay so tiles land at
+				// identical (origin + k × step) positions in both canvases.
+				const kx = Math.ceil(reach / step_x);
+				const ky = Math.ceil(reach / step_y);
+				for (let j = -ky; j <= ky; j++) {
+					for (let i = -kx; i <= kx; i++) {
+						ctx.drawImage(this.wm_img, i * step_x, j * step_y, tile_w, tile_h);
 					}
 				}
 				ctx.restore();
@@ -2261,16 +2319,22 @@ export default {
 			ctx.rotate(angle);
 
 			// Reach from the image center out to the farthest container
-			// corner, so tiles cover the whole overlay (crop box can sit
-			// anywhere and still land on watermarked pixels).
+			// corner, then round up to a STEP multiple so the first tile
+			// always lands at `origin + k × step` (k integer). Without
+			// this, the loop would start at `-reach` (whatever reach
+			// happens to be) and the tile phase would drift every time
+			// zoom changed step size — visible as the pattern shifting
+			// sideways on +/- even though the image didn't move.
 			const max_dist = Math.sqrt(
 				Math.max(ox, container_w - ox) ** 2 +
 				Math.max(oy, container_h - oy) ** 2
 			);
 			const reach = max_dist + Math.max(tile_w, tile_h);
-			for (let y = -reach; y < reach; y += step_y) {
-				for (let x = -reach; x < reach; x += step_x) {
-					ctx.drawImage(this.wm_img, x, y, tile_w, tile_h);
+			const kx = Math.ceil(reach / step_x);
+			const ky = Math.ceil(reach / step_y);
+			for (let j = -ky; j <= ky; j++) {
+				for (let i = -kx; i <= kx; i++) {
+					ctx.drawImage(this.wm_img, i * step_x, j * step_y, tile_w, tile_h);
 				}
 			}
 			ctx.restore();
@@ -3619,6 +3683,15 @@ img {
 	border-color: #3b82f6 !important;
 	box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
+/* Scrubber hint: horizontal-resize cursor on hover so users know the
+   input is draggable (Figma/Blender convention). Value stays editable
+   by tab/focus + type; drag is an extra interaction, not a replacement. */
+.scrubber-input {
+	cursor: ew-resize;
+}
+.scrubber-input:focus {
+	cursor: text;
+}
 .comments-actions {
 	display: flex;
 	gap: 6px;
@@ -3659,19 +3732,24 @@ img {
    transparent to events and falls through to CropperJS. */
 .comment-overlay {
 	pointer-events: none;
+	/* Sit above the watermark canvas (z-index: 5) and CropperJS's crop
+	   chrome (no explicit z-index, so still under 10). */
+	z-index: 10;
+	position: absolute;
 }
 .comment-overlay-box {
 	position: absolute;
 	border: 1px dashed rgba(16, 185, 129, 0.65);
 	box-sizing: border-box;
 	user-select: none;
-	display: flex;
-	align-items: flex-start;   /* text flows from top of the box, not centered */
-	justify-content: center;
-	overflow: hidden;
 	background: rgba(16, 185, 129, 0.04);
 	pointer-events: auto;
 	cursor: move;
+	/* overflow: visible — text can extend past the box edges, matching
+	   Figma/Canva behaviour. The box is a positioning target, not a clip
+	   mask. If the user makes the box smaller than the text, the text
+	   keeps rendering outside. */
+	overflow: visible;
 }
 .comment-overlay-box:hover {
 	background: rgba(16, 185, 129, 0.1);
@@ -3685,13 +3763,21 @@ img {
 	opacity: 0.85;
 }
 .comment-overlay-text {
-	width: 100%;
+	position: absolute;
+	left: 0;
+	top: 0;
 	padding: 2px 4px;
+	box-sizing: border-box;
 	line-height: 1.15;
-	word-break: break-word;
+	/* pre-wrap so the user's own \n characters (Enter in the textarea)
+	   wrap, but runs of plain spaces still collapse. The template keeps
+	   {{ box.text }} on one line so none of the template's indentation
+	   whitespace leaks into the rendered content. */
 	white-space: pre-wrap;
-	overflow: hidden;
-	text-overflow: clip;
+	/* Halo so dark text reads on dark product, light text on light. */
+	text-shadow:
+		0 0 2px rgba(255, 255, 255, 0.9),
+		0 0 4px rgba(255, 255, 255, 0.7);
 }
 .comment-rotate-handle {
 	position: absolute;
