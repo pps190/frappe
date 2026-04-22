@@ -474,6 +474,7 @@
 							:presets="comment_presets || []"
 							:defaults="local_comment_defaults || {}"
 							:enabled="comments_enabled_default"
+							@input="step1_comment_boxes = $event"
 							@change="step1_comment_boxes = $event"
 							@reset-enabled="comments_enabled_default = !!(comment_defaults && comment_defaults.enabled)"
 						/>
