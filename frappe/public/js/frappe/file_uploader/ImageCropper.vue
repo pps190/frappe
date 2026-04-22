@@ -2750,6 +2750,14 @@ img {
 	cursor: zoom-in;
 	transition: box-shadow 0.15s ease, transform 0.12s ease;
 	flex-shrink: 0;
+	background-color: #fff;
+	background-image:
+		linear-gradient(45deg, #ccc 25%, transparent 25%),
+		linear-gradient(-45deg, #ccc 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #ccc 75%),
+		linear-gradient(-45deg, transparent 75%, #ccc 75%);
+	background-size: 10px 10px;
+	background-position: 0 0, 0 5px, 5px -5px, -5px 0;
 }
 .cropper-preview-canvas {
 	max-width: 50px;
@@ -3956,25 +3964,28 @@ img {
    this bump the viewer opens UNDERNEATH the upload dialog and the
    user can't interact with it.
 
-   NOTE: do NOT override .el-image-viewer__mask's background or
-   opacity — that element is the full-viewport positioning container
-   for the img, so backgrounding it paints over the image too. The
-   mask's default translucent black is already fine for a lightbox.
-   For transparent-PNG readability we add checkerboard to the img
-   itself below. */
+   Do NOT give .el-image-viewer__mask its own z-index. The mask is a
+   sibling of .el-image-viewer__canvas inside the wrapper; in default
+   DOM order mask renders first and canvas second, so the image sits
+   *on top* of the translucent black mask. Adding z-index to the mask
+   promotes it above the image (because canvas has no explicit z-index)
+   and the half-opaque black overlays the entire photo — which is what
+   made the preview look ~50% darker than the workspace. */
 .el-image-viewer__wrapper {
 	z-index: 2050 !important;
 }
-.el-image-viewer__mask {
-	z-index: 2049 !important;
-}
+/* Checkerboard behind transparent pixels so the lightbox matches the
+   CropperJS workspace (cropperjs/dist/images/bg.png — light gray on
+   white, 16×16 repeat). */
 .el-image-viewer__canvas .el-image-viewer__img {
-	/* Match the cropper workspace backdrop (#2c2c2c) so what the user
-	   sees in the thumb/lightbox is identical in colour to the cropper
-	   stage. No white fill and no checkerboard — the workspace itself
-	   doesn't show one either; the dark backdrop reads as "this area
-	   is transparent" by convention. */
-	background-color: #2c2c2c;
+	background-color: #fff;
+	background-image:
+		linear-gradient(45deg, #ccc 25%, transparent 25%),
+		linear-gradient(-45deg, #ccc 25%, transparent 25%),
+		linear-gradient(45deg, transparent 75%, #ccc 75%),
+		linear-gradient(-45deg, transparent 75%, #ccc 75%);
+	background-size: 16px 16px;
+	background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
 	border-radius: 4px;
 }
