@@ -24,10 +24,11 @@ export default class FileUploader {
 		remove_bg_disabled_hint,
 		remove_bg_disabled_link,
 		remove_bg_padding_pct,
+		default_crop_aspect,
+		default_solid_background,
+		default_background_color,
 		show_watermark,
 		watermark_settings,
-		show_resize,
-		resize_settings,
 		show_comments,
 		comment_defaults,
 		comment_presets,
@@ -39,8 +40,6 @@ export default class FileUploader {
 		this.remove_bg_padding_pct = remove_bg_padding_pct;
 		this.show_watermark = show_watermark;
 		this.watermark_settings = watermark_settings;
-		this.show_resize = show_resize;
-		this.resize_settings = resize_settings;
 		this.show_comments = show_comments;
 		this.comment_defaults = comment_defaults;
 		this.comment_presets = comment_presets;
@@ -74,10 +73,11 @@ export default class FileUploader {
 						remove_bg_default,
 						remove_bg_disabled_hint,
 						remove_bg_padding_pct,
+						default_crop_aspect,
+						default_solid_background,
+						default_background_color,
 						show_watermark,
 						watermark_settings,
-						show_resize,
-						resize_settings,
 						show_comments,
 						comment_defaults,
 						comment_presets,
