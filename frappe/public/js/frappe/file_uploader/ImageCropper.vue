@@ -26,6 +26,27 @@
 					</div>
 				</div>
 
+				<!-- Solid background toggle + colour picker. Live-previewed
+				     in the workspace: when on, the checkerboard behind the
+				     image is replaced with the chosen colour so the user
+				     sees exactly what the flattened JPEG output will look
+				     like. Hidden when fixed_aspect_ratio is set (batch
+				     re-uploads), same as the Crop ratio group — those
+				     flows keep Settings defaults. -->
+				<div class="cropper-toolbar-group cropper-toolbar-bg" v-if="fixed_aspect_ratio == null">
+					<label class="cropper-toolbar-toggle" :title="__('Flatten transparency onto a solid background colour — output becomes JPEG')">
+						<input type="checkbox" v-model="solid_background" />
+						<span>{{ __("Solid bg") }}</span>
+					</label>
+					<input
+						v-if="solid_background"
+						type="color"
+						class="cropper-toolbar-colour"
+						v-model="background_color"
+						:title="__('Background colour')"
+					/>
+				</div>
+
 				<!-- Zoom group — viewMode:0 lets the crop box extend past the
 				     image, so users need explicit zoom controls to zoom out
 				     and see the working area around the picture. Wheel +
@@ -39,6 +60,19 @@
 						<button type="button" class="btn btn-default btn-sm" :title="__('Zoom in')" @click="zoom_by(0.1)">+</button>
 					</div>
 				</div>
+
+				<!-- One Save-as-Default button persists the whole crop
+				     toolbar state (aspect + solid background + colour)
+				     onto Image Processing Settings. Hidden in fixed-ratio
+				     batch flows since those rows don't edit defaults. -->
+				<button
+					v-if="fixed_aspect_ratio == null"
+					class="btn btn-xs btn-primary-light cropper-toolbar-save"
+					:title="__('Remember crop ratio, solid background, and colour as defaults for future uploads')"
+					@click="save_crop_defaults"
+				>
+					{{ __("Save as Default") }}
+				</button>
 
 				<!-- Preview block inline in the toolbar, right-aligned via
 				     margin-left: auto so the full toolbar height stays
@@ -87,7 +121,9 @@
 					ref="wrapper"
 					:class="{
 						'bg-processing': bg_processing,
+						'show-bg-colour': solid_background,
 					}"
+					:style="solid_background ? { '--cropper-bg-colour': background_color } : null"
 					@mousedown="on_wrapper_mousedown"
 					@wheel.prevent="on_wrapper_wheel"
 					@touchstart="on_wrapper_touchstart"
@@ -187,19 +223,6 @@
 					<span class="cropper-feature-tab-state" :class="comments_enabled ? 'on' : 'off'">
 						<span class="cropper-feature-tab-dot"></span>
 						{{ comments_enabled ? __("on") : __("off") }}
-					</span>
-				</button>
-				<button
-					v-if="show_resize"
-					type="button"
-					class="cropper-feature-tab"
-					:class="{ active: active_tab === 'canvas' }"
-					@click="active_tab = 'canvas'"
-				>
-					<span class="cropper-feature-tab-label">{{ __("Canvas") }}</span>
-					<span class="cropper-feature-tab-state" :class="resize_enabled ? 'on' : 'off'">
-						<span class="cropper-feature-tab-dot"></span>
-						{{ resize_enabled ? __("on") : __("off") }}
 					</span>
 				</button>
 			</div>
@@ -570,78 +593,6 @@
 						</div>
 					</div>
 				</div>
-
-				<!-- CANVAS TAB (was Resize / Output Shape) -->
-				<div v-show="active_tab === 'canvas'" class="cropper-tab-pane">
-					<div class="cropper-tab-enable">
-						<span class="cropper-tab-enable-label">{{ __("Enable Canvas normalization") }}</span>
-						<div
-							class="toggle-pill toggle-pill-compact"
-							:class="{ active: resize_enabled }"
-							@click="resize_enabled = !resize_enabled"
-						>
-							<span class="toggle-pill-switch">
-								<span class="toggle-pill-track" :class="{ on: resize_enabled }">
-									<span class="toggle-pill-thumb"></span>
-								</span>
-							</span>
-						</div>
-					</div>
-					<div v-if="resize_enabled" class="adjustments-row adjustments-row-resize">
-						<div class="canvas-field">
-							<span class="canvas-sublabel">{{ __("Aspect") }}</span>
-							<div class="segmented-tabs canvas-segmented">
-								<button
-									v-for="a in aspect_ratio_options"
-									:key="a"
-									class="segmented-tab"
-									:class="{ active: resize_aspect === a }"
-									@click="resize_aspect = a"
-								>{{ a }}</button>
-							</div>
-						</div>
-						<div class="canvas-field">
-							<span class="canvas-sublabel">{{ __("Fit mode") }}</span>
-							<div class="segmented-tabs canvas-segmented">
-								<button
-									v-for="m in resize_mode_options"
-									:key="m"
-									class="segmented-tab"
-									:class="{ active: resize_mode === m, disabled: resize_aspect === 'Free' }"
-									:disabled="resize_aspect === 'Free'"
-									@click="resize_mode = m"
-								>{{ __(m) }}</button>
-							</div>
-						</div>
-						<div class="canvas-misc-row">
-							<label class="resize-inline-toggle">
-								<input type="checkbox" v-model="resize_flatten_rgb" />
-								<span>{{ __("Solid background") }}</span>
-							</label>
-							<label
-								v-if="resize_flatten_rgb"
-								class="resize-inline-field"
-							>
-								<span>{{ __("Color") }}</span>
-								<input
-									type="color"
-									class="resize-color"
-									v-model="resize_fill_color"
-								/>
-							</label>
-							<span
-								v-if="!resize_flatten_rgb"
-								class="resize-hint"
-							>
-								{{ __("Transparent background (PNG)") }}
-							</span>
-						</div>
-						<div class="wm-panel-actions">
-							<button class="btn btn-xs btn-default" @click="_reset_canvas_defaults">{{ __("Reset") }}</button>
-							<button class="btn btn-xs btn-primary-light" @click="_save_canvas_defaults">{{ __("Save as Default") }}</button>
-						</div>
-					</div>
-				</div>
 			</div>
 		</div>
 		<!-- Bottom action row spans both columns so Back / Crop sit in the
@@ -673,9 +624,16 @@ export default {
 	props: [
 		"file", "fixed_aspect_ratio",
 		"show_remove_bg", "remove_bg_checked", "remove_bg_padding_pct",
+		// Initial crop-box aspect remembered in Image Processing Settings
+		// ("Free" | "1:1" | "4:3" | "16:9"). Seeds the toolbar button row.
+		"default_crop_aspect",
+		// Solid Background toggle + colour remembered in Settings. When
+		// on, the workspace paints the colour behind the image and the
+		// final crop is flattened to that colour (JPEG). When off, the
+		// workspace shows CropperJS's checkerboard and the output keeps
+		// its alpha channel as PNG.
+		"default_solid_background", "default_background_color",
 		"show_watermark", "watermark_settings", "wm_default_enabled",
-		// Resize (new 2026-04) — from Image Processing Settings via item.js
-		"show_resize", "resize_settings", "resize_default_enabled",
 		// Comments (new 2026-04) — simple list of text overlays baked into
 		// the final output. The single-item flow uses a lightweight
 		// textarea-based editor (no drag). Batch flow uses the full
@@ -691,7 +649,14 @@ export default {
 			src: null,
 			cropper: null,
 			image: null,
+			// Seeded from default_crop_aspect prop in mounted(). NaN = Free
+			// (user picks a ratio in the toolbar). Numeric otherwise.
 			aspect_ratio: NaN,
+			// Solid Background state — seeded in mounted() from the
+			// matching default_* props. Watcher below keeps the workspace
+			// backdrop style + preview re-render in sync with edits.
+			solid_background: false,
+			background_color: "#FFFFFF",
 			// Remove BG
 			bg_removed: false,
 			bg_processing: false,
@@ -732,19 +697,6 @@ export default {
 			// gate drag permissions — every overlay element captures its
 			// own events regardless of selected_type.
 			selected_type: "crop",
-			// Output Shape (new 2026-04) — baked into the final cropped canvas
-			// before upload. Same logic as the server-side PIL helper in
-			// item_image_batch.py::_apply_aspect_normalize.
-			resize_enabled: false,
-			resize_aspect: "1:1",
-			resize_mode: "Contain",
-			resize_fill_color: "#FFFFFF",
-			resize_flatten_rgb: true,
-			// max_file_size_kb intentionally NOT tracked in local state —
-			// it's a global Settings value enforced server-side when a
-			// batch is processed. Single-item uploads don't need it.
-			aspect_ratio_options: ["1:1", "4:3", "16:9", "3:2", "2:3", "Free"],
-			resize_mode_options: ["Contain", "Cover", "Stretch"],
 			// Live preview (new 2026-04) — rerenders on any resize param
 			// change so the user sees exactly what Crop will produce.
 			preview_dims: null,
@@ -786,7 +738,23 @@ export default {
 	},
 	watch: {
 		aspect_ratio(value) {
-			if (this.cropper) {
+			if (!this.cropper) return;
+			// When we have a Remove BG bbox, re-snap the crop box to that
+			// bbox + padding expanded to the new aspect (and auto-zoom).
+			// This gives the user "change aspect, product recentres" —
+			// better than CropperJS's default which anchors on the
+			// existing rect's top-left corner.
+			if (this.bg_removed && this.nobg_bbox) {
+				this._apply_auto_crop();
+				return;
+			}
+			// Otherwise: reshape the current crop rect around its centre.
+			const cur = this.cropper.getData();
+			if (cur && Number.isFinite(value) && value > 0) {
+				const new_rect = this._expand_rect_to_aspect(cur, value);
+				this.cropper.setAspectRatio(value);
+				this.cropper.setData(new_rect);
+			} else {
 				this.cropper.setAspectRatio(value);
 			}
 		},
@@ -800,24 +768,11 @@ export default {
 		active_tab() {
 			this._schedule_preview_update();
 		},
-		// Any change to resize params → rerender the preview. Debounced
-		// so slider drags don't hammer the off-screen canvas composite.
-		resize_enabled(v) {
-			this._schedule_preview_update();
-			this.$emit("resize_enabled_changed", !!v);
-		},
-		// Merged with the duplicate comments_enabled() below to preserve
-		// the $emit (Vue keeps only the last-declared watcher of the same
-		// key). Without this, FileUploader.comments_enabled_default never
-		// re-syncs with the cropper's toggle.
-
-		resize_aspect() { this._schedule_preview_update(); },
-		resize_mode() { this._schedule_preview_update(); },
-		resize_fill_color() { this._schedule_preview_update(); },
-		resize_flatten_rgb() { this._schedule_preview_update(); },
 		// Watermark + padding also affect final output — refresh preview
 		// on those too so the user sees the composite result.
 		wm_enabled() { this._schedule_preview_update(); },
+		solid_background() { this._schedule_preview_update(); },
+		background_color() { this._schedule_preview_update(); },
 		wm_opacity() { this._schedule_preview_update(); },
 		wm_size() { this._schedule_preview_update(); },
 		wm_pos_x() { this._schedule_preview_update(); },
@@ -862,12 +817,23 @@ export default {
 		},
 	},
 	mounted() {
+		// Seed the crop-box aspect from the user's remembered default.
+		// fixed_aspect_ratio (set by the batch per-row cropper via
+		// restrictions.crop_image_aspect_ratio) takes precedence —
+		// batch rows enforce 1:1 and the toolbar is hidden there.
+		if (this.fixed_aspect_ratio != null) {
+			this.aspect_ratio = Number(this.fixed_aspect_ratio);
+		} else if (this.default_crop_aspect) {
+			this.aspect_ratio = this._aspect_string_to_number(this.default_crop_aspect);
+		}
+		this.solid_background = !!this.default_solid_background;
+		this.background_color = this.default_background_color || "#FFFFFF";
+
 		// Initial active tab — open on the first feature that's shown.
-		// Priority: Remove BG → Watermark → Comments → Canvas.
+		// Priority: Remove BG → Watermark → Comments.
 		if (this.show_remove_bg) this.active_tab = "remove_bg";
 		else if (this.show_watermark) this.active_tab = "watermark";
 		else if (this.show_comments) this.active_tab = "comments";
-		else if (this.show_resize) this.active_tab = "canvas";
 
 		// Remove BG: cached files + bbox metadata (Phase 1)
 		this.original_file = this.file._original_file || this.file.cropper_file;
@@ -904,25 +870,6 @@ export default {
 			this.wm_tile_rotation = this.watermark_settings.tile_rotation != null ? this.watermark_settings.tile_rotation : -30;
 			this.wm_tile_spacing = this.watermark_settings.tile_spacing || 40;
 			this.load_watermark_image(this.watermark_settings.watermark_image);
-		}
-
-		// Resize: load settings (new 2026-04). The pre-cropper footer
-		// toggle (resize_default_enabled) wins over Settings so a user
-		// who flipped Canvas off on the file-picker page stays off.
-		if (this.show_resize && this.resize_settings) {
-			this.resize_enabled = this.resize_default_enabled != null
-				? !!this.resize_default_enabled
-				: !!this.resize_settings.resize_enabled;
-			this.resize_aspect = this.resize_settings.resize_aspect || "1:1";
-			this.resize_mode = this.resize_settings.resize_mode || "Contain";
-			this.resize_fill_color = this.resize_settings.resize_fill_color || "#FFFFFF";
-			// Default to true when the settings object has no explicit
-			// value (undefined) — the doctype default is 1, so a newly
-			// installed site shouldn't accidentally produce transparent
-			// PNGs just because the settings object was cached before
-			// this field existed.
-			this.resize_flatten_rgb = this.resize_settings.resize_flatten_rgb !== false;
-			// (max_file_size_kb is global Settings only; not read here)
 		}
 
 		// Comments: off by default on new uploads unless the footer
@@ -1120,8 +1067,7 @@ export default {
 			return (
 				(this.show_remove_bg && this.bg_removed) ||
 				(this.show_watermark && this.wm_enabled) ||
-				(this.show_comments && this.comments_enabled) ||
-				(this.show_resize && this.resize_enabled)
+				(this.show_comments && this.comments_enabled)
 			);
 		},
 
@@ -1130,16 +1076,13 @@ export default {
 		// renders at all — if the user opened the cropper with none of the
 		// features enabled, the panel is hidden and the cropper is full-width.
 		any_feature_shown() {
-			return !!(this.show_remove_bg || this.show_watermark ||
-			          this.show_comments || this.show_resize);
+			return !!(this.show_remove_bg || this.show_watermark || this.show_comments);
 		},
 
 		// Human-readable output format label for the preview chip.
-		// Determined by what's on: flatten forces JPEG, otherwise PNG.
+		// PNG when we have alpha-bearing output (Remove BG / Watermark /
+		// Comments baked in); blank otherwise (no processing = original file).
 		preview_format_label() {
-			if (this.show_resize && this.resize_enabled && this.resize_flatten_rgb) {
-				return "JPEG";
-			}
 			if (this.bg_removed || this.wm_enabled ||
 			    (this.show_comments && this.comments_enabled && this.comment_boxes.length)) {
 				return "PNG";
@@ -1239,22 +1182,136 @@ export default {
 		_apply_auto_crop() {
 			// Snap the Cropper crop box to the product's non-transparent bounding
 			// box plus a configurable padding. Called from the Cropper `ready`
-			// callback after a Remove BG result is loaded.
+			// callback after a Remove BG result is loaded, and again whenever
+			// the user changes the aspect button or padding slider.
 			//
-			// Padding is a percentage of the LONGER side of the bbox (so wide or
-			// tall products both get a proportional border). Negative values
-			// tighten into the bbox to shed anti-aliasing halos. CropperJS clamps
-			// the final rectangle to the image bounds automatically.
+			// Padding is a percentage of the LONGER side of the bbox (so wide
+			// or tall products both get a proportional border). Negative values
+			// tighten into the bbox to shed anti-aliasing halos.
+			//
+			// With an aspect constraint active, the bbox+padding rect is
+			// LETTERBOXED (never cropped) to match the target aspect by
+			// expanding the shorter side around the product centre. viewMode:0
+			// on the cropper lets the rect extend past the image bounds — the
+			// workspace shows the overflow area as either checkerboard
+			// (transparent output) or the solid background colour.
 			if (!this.cropper || !this.nobg_bbox) return;
 			const { x, y, width, height } = this.nobg_bbox;
 			const padding_pct = this.effective_padding_pct;
 			const pad = (padding_pct / 100) * Math.max(width, height);
-			this.cropper.setData({
+			let rect = {
 				x: x - pad,
 				y: y - pad,
 				width: width + 2 * pad,
 				height: height + 2 * pad,
-			});
+			};
+			rect = this._expand_rect_to_aspect(rect, this.aspect_ratio);
+			this.cropper.setData(rect);
+			this._zoom_to_fit_rect(rect, 0.12);
+		},
+
+		// Grow the shorter side of `rect` around its centre so it matches
+		// `aspect` (w/h). NaN/invalid aspect returns rect untouched. Never
+		// shrinks — overflow past the image is fine (viewMode:0).
+		_expand_rect_to_aspect(rect, aspect) {
+			if (!Number.isFinite(aspect) || aspect <= 0) return rect;
+			const cur = rect.width / rect.height;
+			if (Math.abs(cur - aspect) < 1e-4) return rect;
+			if (cur < aspect) {
+				const new_w = rect.height * aspect;
+				return {
+					x: rect.x - (new_w - rect.width) / 2,
+					y: rect.y,
+					width: new_w,
+					height: rect.height,
+				};
+			}
+			const new_h = rect.width / aspect;
+			return {
+				x: rect.x,
+				y: rect.y - (new_h - rect.height) / 2,
+				width: rect.width,
+				height: new_h,
+			};
+		},
+
+		// Auto-zoom so `rect` (natural-image coords) fills the workspace
+		// with a ~margin_ratio breathing room. `cropper.zoomTo` mutates
+		// internal view state, so we re-assert the crop box afterwards.
+		_zoom_to_fit_rect(rect, margin_ratio) {
+			if (!this.cropper || !this.$refs.wrapper) return;
+			const container = this.$refs.wrapper.getBoundingClientRect();
+			if (!container.width || !container.height) return;
+			const tw = container.width * (1 - 2 * margin_ratio);
+			const th = container.height * (1 - 2 * margin_ratio);
+			const scale = Math.min(tw / rect.width, th / rect.height);
+			if (!Number.isFinite(scale) || scale <= 0) return;
+			try {
+				this.cropper.zoomTo(scale);
+				this.cropper.setData(rect);
+			} catch (e) {
+				// cropper may still be laying out — ignore
+			}
+		},
+
+		// "1:1" → 1, "4:3" → 4/3, "16:9" → 16/9, "Free"/unknown → NaN.
+		_aspect_string_to_number(s) {
+			if (!s || s === "Free") return NaN;
+			const parts = String(s).split(":");
+			if (parts.length !== 2) return NaN;
+			const w = Number(parts[0]);
+			const h = Number(parts[1]);
+			if (!Number.isFinite(w) || !Number.isFinite(h) || h === 0) return NaN;
+			return w / h;
+		},
+
+		// 1 → "1:1", 4/3 → "4:3", NaN → "Free". Matches the options set
+		// on Image Processing Settings.crop_aspect (Select).
+		_aspect_number_to_string(n) {
+			if (!Number.isFinite(n)) return "Free";
+			if (Math.abs(n - 1) < 1e-4) return "1:1";
+			if (Math.abs(n - 4 / 3) < 1e-4) return "4:3";
+			if (Math.abs(n - 16 / 9) < 1e-4) return "16:9";
+			return "Free";
+		},
+
+		async save_crop_defaults() {
+			// Persist the full Crop-toolbar state (aspect + solid
+			// background + colour) as system-wide defaults in Image
+			// Processing Settings. Updating in-process cache too so
+			// re-opening the uploader without refreshing picks up the
+			// new defaults. Mirrors save_padding_default.
+			const aspect = this._aspect_number_to_string(this.aspect_ratio);
+			const solid = this.solid_background ? 1 : 0;
+			const colour = this.background_color || "#FFFFFF";
+			try {
+				await frappe.call({
+					method: "frappe.client.set_value",
+					args: {
+						doctype: "Image Processing Settings",
+						name: "Image Processing Settings",
+						fieldname: {
+							crop_aspect: aspect,
+							solid_background: solid,
+							background_color: colour,
+						},
+					},
+				});
+				if (frappe._image_processing_settings_cache) {
+					frappe._image_processing_settings_cache.crop_aspect = aspect;
+					frappe._image_processing_settings_cache.solid_background = !!solid;
+					frappe._image_processing_settings_cache.background_color = colour;
+				}
+				frappe.show_alert({
+					message: __("Crop defaults saved"),
+					indicator: "green",
+				});
+			} catch (e) {
+				frappe.show_alert({
+					message: __("Failed to save default"),
+					indicator: "red",
+				});
+			}
 		},
 
 		// ── Remove BG padding control (Phase 1 — live-edit from Remove BG card) ──
@@ -1323,22 +1380,14 @@ export default {
 				this._composite_comments_on_canvas(canvas, cctx);
 			}
 
-			// ── Resize step (new 2026-04) ──
-			// Apply aspect normalization + optional RGB flatten to a fresh
-			// canvas that mirrors the server-side PIL helper in
-			// item_image_batch.py::_apply_aspect_normalize. Happens AFTER the
-			// watermark + comments composites (so both stay on product
-			// content, not on Contain-padded fill strips).
+			// If Solid Background is on, flatten the cropped canvas onto
+			// the chosen colour before encoding. Produces JPEG (opaque,
+			// smaller); otherwise keep alpha as PNG when Remove BG /
+			// Watermark ran, or fall back to the source type.
 			let final_canvas = canvas;
-			if (this.show_resize && this.resize_enabled) {
-				final_canvas = this._apply_output_shape(canvas);
-			}
-
-			// Pick a type: flatten → JPEG (smaller, opaque); otherwise PNG
-			// when Remove BG or Watermark was applied (needs alpha or we
-			// have pixels that don't match the source type).
 			let file_type;
-			if (this.show_resize && this.resize_enabled && this.resize_flatten_rgb) {
+			if (this.solid_background) {
+				final_canvas = this._flatten_onto_colour(canvas, this.background_color || "#FFFFFF");
 				file_type = "image/jpeg";
 			} else if (this.bg_removed || this.wm_enabled) {
 				file_type = "image/png";
@@ -1350,10 +1399,7 @@ export default {
 				let name = this.file.name;
 				if (this.bg_removed) name = name.replace(/\.[^.]+$/, "_nobg.png");
 				if (this.wm_enabled) name = name.replace(/\.[^.]+$/, "_wm.png");
-				if (this.show_resize && this.resize_enabled) {
-					const ext = file_type === "image/jpeg" ? ".jpg" : ".png";
-					name = name.replace(/\.[^.]+$/, "_shape" + ext);
-				}
+				if (this.solid_background) name = name.replace(/\.[^.]+$/, ".jpg");
 				this.file.file_obj = new File([blob], name, { type: blob.type });
 				this.file.name = name;
 				// Emit the final settings snapshot so FileUploader's Step 3
@@ -1366,118 +1412,25 @@ export default {
 					watermark_mode: this.wm_mode,
 					comments_enabled: !!this.comments_enabled,
 					comment_count: (this.comment_boxes || []).length,
-					resize_enabled: !!this.resize_enabled,
-					resize_aspect: this.resize_aspect,
-					resize_mode: this.resize_mode,
+					crop_aspect: this._aspect_number_to_string(this.aspect_ratio),
+					solid_background: !!this.solid_background,
+					background_color: this.background_color,
 				});
 				this.$emit("toggle_image_cropper");
 			}, file_type, file_type === "image/jpeg" ? 0.92 : undefined);
 		},
 
-		// Aspect-normalize a canvas via Canvas 2D. Mirrors the server-side
-		// _apply_aspect_normalize in item_image_batch.py so the baked file
-		// from a single-image upload and from a batch process look the same.
-		_apply_output_shape(src_canvas) {
-			const aspect_map = {
-				"1:1": [1, 1],
-				"4:3": [4, 3],
-				"16:9": [16, 9],
-				"3:2": [3, 2],
-				"2:3": [2, 3],
-			};
-
-			const aspect = this.resize_aspect;
-			const mode = this.resize_mode;
-			const sw = src_canvas.width;
-			const sh = src_canvas.height;
-
-			// Free or unknown → pass-through (optionally flatten)
-			if (aspect === "Free" || !(aspect in aspect_map)) {
-				return this._maybe_flatten(src_canvas, sw, sh, src_canvas);
-			}
-
-			const [tw, th] = aspect_map[aspect];
-			const src_ratio = sw / sh;
-			const tgt_ratio = tw / th;
-
-			if (Math.abs(src_ratio - tgt_ratio) < 1e-3) {
-				return this._maybe_flatten(src_canvas, sw, sh, src_canvas);
-			}
-
-			if (mode === "Stretch") {
-				let new_w, new_h;
-				if (src_ratio > tgt_ratio) {
-					new_w = sw;
-					new_h = Math.round(sw / tgt_ratio);
-				} else {
-					new_w = Math.round(sh * tgt_ratio);
-					new_h = sh;
-				}
-				const out = document.createElement("canvas");
-				out.width = new_w;
-				out.height = new_h;
-				out.getContext("2d").drawImage(src_canvas, 0, 0, new_w, new_h);
-				return this._maybe_flatten(out, new_w, new_h, out);
-			}
-
-			if (mode === "Cover") {
-				let new_w, new_h, off_x = 0, off_y = 0;
-				if (src_ratio > tgt_ratio) {
-					// Source wider — crop left/right
-					new_w = Math.round(sh * tgt_ratio);
-					new_h = sh;
-					off_x = Math.floor((sw - new_w) / 2);
-				} else {
-					// Source taller — crop top/bottom
-					new_w = sw;
-					new_h = Math.round(sw / tgt_ratio);
-					off_y = Math.floor((sh - new_h) / 2);
-				}
-				const out = document.createElement("canvas");
-				out.width = new_w;
-				out.height = new_h;
-				out.getContext("2d").drawImage(
-					src_canvas,
-					off_x, off_y, new_w, new_h,
-					0, 0, new_w, new_h,
-				);
-				return this._maybe_flatten(out, new_w, new_h, out);
-			}
-
-			// Contain: expand shorter axis, pad with fill color.
-			let canvas_w, canvas_h;
-			if (src_ratio > tgt_ratio) {
-				canvas_w = sw;
-				canvas_h = Math.round(sw / tgt_ratio);
-			} else {
-				canvas_w = Math.round(sh * tgt_ratio);
-				canvas_h = sh;
-			}
+		// Paint `src` on top of a solid-colour fill canvas of the same
+		// dimensions so alpha pixels get baked onto `hex`. Used by
+		// crop_image() + _render_preview() when Solid Background is on.
+		_flatten_onto_colour(src, hex) {
 			const out = document.createElement("canvas");
-			out.width = canvas_w;
-			out.height = canvas_h;
+			out.width = src.width;
+			out.height = src.height;
 			const ctx = out.getContext("2d");
-			// Fill the padding area first — transparent if flatten is off,
-			// or fill color if flatten is on so the composite is opaque.
-			if (this.resize_flatten_rgb) {
-				ctx.fillStyle = this.resize_fill_color || "#FFFFFF";
-				ctx.fillRect(0, 0, canvas_w, canvas_h);
-			}
-			const paste_x = Math.floor((canvas_w - sw) / 2);
-			const paste_y = Math.floor((canvas_h - sh) / 2);
-			ctx.drawImage(src_canvas, paste_x, paste_y);
-			return this._maybe_flatten(out, canvas_w, canvas_h, out);
-		},
-
-		_maybe_flatten(maybe_rgba_canvas, w, h, src_canvas) {
-			if (!this.resize_flatten_rgb) return maybe_rgba_canvas;
-			const out = document.createElement("canvas");
-			out.width = w;
-			out.height = h;
-			const ctx = out.getContext("2d");
-			ctx.fillStyle = this.resize_fill_color || "#FFFFFF";
-			ctx.fillRect(0, 0, w, h);
-			ctx.drawImage(src_canvas, 0, 0);
+			ctx.fillStyle = hex || "#FFFFFF";
+			ctx.fillRect(0, 0, out.width, out.height);
+			ctx.drawImage(src, 0, 0);
 			return out;
 		},
 
@@ -1779,35 +1732,6 @@ export default {
 			});
 		},
 
-		// ── Canvas (resize + fill + flatten) reset / save ──
-		_reset_canvas_defaults() {
-			const s = this.resize_settings || {};
-			this.resize_enabled = s.resize_enabled !== undefined ? !!s.resize_enabled : true;
-			this.resize_aspect = s.resize_aspect || "1:1";
-			this.resize_mode = s.resize_mode || "Contain";
-			this.resize_fill_color = s.resize_fill_color || "#FFFFFF";
-			this.resize_flatten_rgb = s.resize_flatten_rgb !== undefined ? !!s.resize_flatten_rgb : true;
-		},
-		_save_canvas_defaults() {
-			frappe.call({
-				method: "frappe.client.set_value",
-				args: {
-					doctype: "Image Processing Settings",
-					name: "Image Processing Settings",
-					fieldname: {
-						resize_enabled: this.resize_enabled ? 1 : 0,
-						resize_aspect: this.resize_aspect,
-						resize_mode: this.resize_mode,
-						resize_fill_color: this.resize_fill_color,
-						resize_flatten_rgb: this.resize_flatten_rgb ? 1 : 0,
-					},
-				},
-				callback: () => {
-					frappe.show_alert({ message: __("Canvas settings saved as default"), indicator: "green" });
-				},
-			});
-		},
-
 		_add_comment() {
 			const d = this.comment_defaults || {};
 			this.comment_boxes.push({
@@ -1986,8 +1910,7 @@ export default {
 			if (!this.cropper) return;
 
 			// Run the same pipeline crop_image would, but draw to a
-			// 200×200 display canvas. Reuses _apply_output_shape so
-			// preview + actual output match exactly.
+			// 200×200 display canvas so preview + actual output match.
 			let src;
 			try {
 				src = this.cropper.getCroppedCanvas();
@@ -1996,7 +1919,7 @@ export default {
 			}
 			if (!src) return;
 
-			// Apply watermark to a working copy (off-screen)
+			// Apply watermark + comments to a working copy (off-screen).
 			const work = document.createElement("canvas");
 			work.width = src.width;
 			work.height = src.height;
@@ -2005,15 +1928,11 @@ export default {
 			if (this.wm_enabled && this.wm_loaded && this.wm_img) {
 				this._composite_watermark_on_canvas(work, wctx);
 			}
-			// Comments — baked BEFORE Resize so box positions stay attached
-			// to product content, not to Contain-padded fill strips.
 			if (this.show_comments && this.comments_enabled) {
 				this._composite_comments_on_canvas(work, wctx);
 			}
-
-			// Apply Resize (same helper used on final crop)
-			const final_canvas = (this.show_resize && this.resize_enabled)
-				? this._apply_output_shape(work)
+			const final_canvas = this.solid_background
+				? this._flatten_onto_colour(work, this.background_color || "#FFFFFF")
 				: work;
 
 			// Compute display box from the preview thumb's actual rendered
@@ -2695,7 +2614,7 @@ export default {
 .cropper-top-toolbar {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 16px;
+	gap: 12px 16px;
 	padding: 8px 12px;
 	margin-bottom: 8px;
 	border: 1px solid var(--border-color);
@@ -2707,11 +2626,50 @@ export default {
 	display: inline-flex;
 	align-items: center;
 	gap: 8px;
+	flex-shrink: 0;
 }
 .cropper-toolbar-label {
 	font-size: 12px;
 	color: #606266;
 	font-weight: 500;
+}
+.cropper-toolbar-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+	font-size: 12px;
+	color: #303133;
+	cursor: pointer;
+	user-select: none;
+}
+.cropper-toolbar-toggle input[type="checkbox"] {
+	margin: 0;
+}
+.cropper-toolbar-colour {
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	border: 1px solid #dcdfe6;
+	border-radius: 4px;
+	background: white;
+	cursor: pointer;
+}
+.cropper-toolbar-save {
+	flex-shrink: 0;
+}
+
+/* Mobile: workspace fills viewport width, toolbar wraps to multiple rows
+   naturally. Shrink the Preview block so it doesn't push other groups
+   off the grid, and let Save sit on its own line alongside Preview. */
+@media (max-width: 768px) {
+	.cropper-top-toolbar {
+		gap: 8px 10px;
+		padding: 8px;
+	}
+	.cropper-toolbar-preview {
+		margin-left: 0;
+	}
 }
 
 img {
@@ -3207,6 +3165,16 @@ img {
 	max-width: 100%;
 	max-height: 100%;
 	display: block;
+}
+
+/* Solid Background live preview: swap CropperJS's built-in checkerboard
+   (its .cropper-bg, which is a repeating bg.png) for the chosen colour
+   so the user sees exactly what the flattened JPEG output will look
+   like. --cropper-bg-colour is set inline by the component's :style
+   binding based on background_color. */
+.cropper-image-wrapper.show-bg-colour >>> .cropper-bg {
+	background-image: none !important;
+	background-color: var(--cropper-bg-colour, #ffffff) !important;
 }
 
 /* While Remove BG is running, hide CropperJS's own crop-box chrome so the

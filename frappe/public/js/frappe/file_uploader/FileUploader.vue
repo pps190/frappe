@@ -263,13 +263,6 @@
 									: __("off") }}
 							</span>
 						</li>
-						<li v-if="show_resize" :class="{ off: !recap.resize_enabled }">
-							<span class="fu-recap-dot" :class="recap.resize_enabled ? 'on' : 'off'"></span>
-							<span class="fu-recap-label">{{ __("Canvas") }}</span>
-							<span class="fu-recap-value">
-								{{ recap.resize_enabled ? recap.resize_aspect : __("off") }}
-							</span>
-						</li>
 					</ul>
 				</div>
 			</template>
@@ -480,57 +473,6 @@
 						/>
 					</div>
 
-					<!-- ── CANVAS pane ── -->
-					<div v-show="active_tab === 'canvas'" class="cropper-tab-pane">
-						<div class="cropper-tab-enable">
-							<span class="cropper-tab-enable-label">{{ __("Enable Canvas normalization") }}</span>
-							<div
-								class="toggle-pill toggle-pill-compact"
-								:class="{ active: resize_enabled_default }"
-								@click="resize_enabled_default = !resize_enabled_default"
-							>
-								<span class="toggle-pill-switch">
-									<span class="toggle-pill-track" :class="{ on: resize_enabled_default }">
-										<span class="toggle-pill-thumb"></span>
-									</span>
-								</span>
-							</div>
-						</div>
-						<div v-if="resize_enabled_default && local_resize_settings" class="adjustments-row">
-							<label class="adjustments-field-label">{{ __("Aspect") }}</label>
-							<div class="segmented-tabs segmented-tabs-aspect" role="tablist">
-								<button v-for="opt in ['1:1', '4:3', '16:9', '3:2', '2:3', 'Free']" :key="opt"
-									type="button" class="segmented-tab"
-									:class="{ active: (local_resize_settings.resize_aspect || '1:1') === opt }"
-									@click="_set_canvas_aspect(opt)">{{ opt }}</button>
-							</div>
-							<label class="adjustments-field-label" style="margin-top:12px">{{ __("Mode") }}</label>
-							<div class="segmented-tabs" role="tablist">
-								<button v-for="opt in ['Contain', 'Cover', 'Stretch']" :key="opt"
-									type="button" class="segmented-tab"
-									:class="{ active: (local_resize_settings.resize_mode || 'Contain') === opt }"
-									@click="_set_canvas_mode(opt)">{{ __(opt) }}</button>
-							</div>
-							<div class="wm-inline-row">
-								<label class="wm-inline-check">
-									<input type="checkbox"
-										:checked="local_resize_settings.resize_flatten_rgb !== false"
-										@change="_set_canvas_field('resize_flatten_rgb', $event.target.checked ? 1 : 0)" />
-									<span>{{ __("Solid Background") }}</span>
-								</label>
-								<label v-if="local_resize_settings.resize_flatten_rgb !== false" class="wm-inline-colour">
-									<span>{{ __("Color") }}</span>
-									<input type="color"
-										:value="local_resize_settings.resize_fill_color || '#FFFFFF'"
-										@input="_set_canvas_field('resize_fill_color', $event.target.value)" />
-								</label>
-							</div>
-							<div class="wm-panel-actions">
-								<button class="btn btn-xs btn-default" @click="_reset_canvas_default">{{ __("Reset") }}</button>
-								<button class="btn btn-xs btn-primary-light" @click="_save_canvas_default">{{ __("Save as Default") }}</button>
-							</div>
-						</div>
-					</div>
 				</div>
 			</template>
 		</div><!-- /.fu-right-col -->
@@ -542,12 +484,12 @@
 			:show_remove_bg="show_remove_bg && !remove_bg_disabled_hint"
 			:remove_bg_checked="remove_bg_checked"
 			:remove_bg_padding_pct="step1_padding_pct"
+			:default_crop_aspect="default_crop_aspect"
+			:default_solid_background="default_solid_background"
+			:default_background_color="default_background_color"
 			:show_watermark="show_watermark"
 			:watermark_settings="local_watermark_settings"
 			:wm_default_enabled="wm_enabled"
-			:show_resize="show_resize"
-			:resize_settings="local_resize_settings"
-			:resize_default_enabled="resize_enabled_default"
 			:show_comments="show_comments"
 			:comment_defaults="local_comment_defaults"
 			:comment_presets="comment_presets"
@@ -558,7 +500,6 @@
 			@remove_bg_changed="remove_bg_checked = $event"
 			@wm_enabled_changed="wm_enabled = $event"
 			@comments_enabled_changed="comments_enabled_default = $event"
-			@resize_enabled_changed="resize_enabled_default = $event"
 			@crop_committed="_on_crop_committed"
 		/>
 		<FileBrowser
@@ -645,18 +586,26 @@ export default {
 		remove_bg_padding_pct: {
 			default: 5,
 		},
+		// Initial crop-box aspect remembered per user in Image Processing
+		// Settings. String form from the settings doc: "Free" | "1:1"
+		// | "4:3" | "16:9". ImageCropper maps to a numeric ratio and
+		// preselects the matching button in its toolbar.
+		default_crop_aspect: {
+			default: "Free",
+		},
+		// Initial Solid Background + colour remembered in Settings. The
+		// cropper exposes a toolbar toggle + colour picker; the active
+		// value is shown live behind the image so users see the output.
+		default_solid_background: {
+			default: false,
+		},
+		default_background_color: {
+			default: "#FFFFFF",
+		},
 		show_watermark: {
 			default: false,
 		},
 		watermark_settings: {
-			default: null,
-		},
-		// Resize (new 2026-04) — aspect normalization applied at
-		// Crop time. Mirror of Image Processing Settings' resize_* fields.
-		show_resize: {
-			default: false,
-		},
-		resize_settings: {
 			default: null,
 		},
 		// Comments (new 2026-04) — show the text-overlay list editor in
@@ -700,10 +649,9 @@ export default {
 			wrapper_ready: false,
 			remove_bg_checked: this.remove_bg_default && !this.remove_bg_disabled_hint,
 			wm_enabled: this.watermark_settings && this.watermark_settings.enabled ? true : false,
-			// Pre-cropper toggles for Comments + Canvas so the file-picker
-			// page exposes the same 4 features the cropper tab-panel does.
+			// Pre-cropper toggle for Comments so the file-picker page
+			// exposes the same feature the cropper tab-panel does.
 			comments_enabled_default: !!(this.comment_defaults && this.comment_defaults.enabled),
-			resize_enabled_default: !!(this.resize_settings && this.resize_settings.resize_enabled),
 			// Step-1 comment box list, seeded from Settings.comment_presets
 			// so "Save as Default" and the initial hydrated list stay in
 			// sync. Any edits here carry over into the cropper's Step 2
@@ -735,9 +683,6 @@ export default {
 			// Step 2 edits roundtrip cleanly.
 			local_watermark_settings: this.watermark_settings
 				? JSON.parse(JSON.stringify(this.watermark_settings))
-				: null,
-			local_resize_settings: this.resize_settings
-				? JSON.parse(JSON.stringify(this.resize_settings))
 				: null,
 			local_comment_defaults: this.comment_defaults
 				? JSON.parse(JSON.stringify(this.comment_defaults))
@@ -795,8 +740,7 @@ export default {
 		// — a plain Attachment upload (no image processing) stays
 		// single-column like the original Frappe uploader.
 		any_feature_shown() {
-			return !!(this.show_remove_bg || this.show_watermark
-				|| this.show_comments || this.show_resize);
+			return !!(this.show_remove_bg || this.show_watermark || this.show_comments);
 		},
 		// Step 3 recap view: prefer post-crop snapshot (last_crop_settings)
 		// so it reflects whatever the user committed in the cropper,
@@ -812,13 +756,7 @@ export default {
 					|| "Tiled",
 				comments_enabled: s.comments_enabled != null ? s.comments_enabled : this.comments_enabled_default,
 				comment_count: s.comment_count || 0,
-				resize_enabled: s.resize_enabled != null ? s.resize_enabled : this.resize_enabled_default,
-				resize_aspect: s.resize_aspect
-					|| (this.local_resize_settings && this.local_resize_settings.resize_aspect)
-					|| "1:1",
-				resize_mode: s.resize_mode
-					|| (this.local_resize_settings && this.local_resize_settings.resize_mode)
-					|| "Contain",
+				crop_aspect: s.crop_aspect || this.default_crop_aspect || "Free",
 			};
 		},
 		// Tab objects used by the v-for in the template. Each entry knows
@@ -845,13 +783,6 @@ export default {
 					key: "comments",
 					label: __("Comments"),
 					on: !!this.comments_enabled_default,
-				});
-			}
-			if (this.show_resize) {
-				tabs.push({
-					key: "canvas",
-					label: __("Canvas"),
-					on: !!this.resize_enabled_default,
 				});
 			}
 			return tabs;
@@ -882,17 +813,8 @@ export default {
 			this.remove_bg_checked = !!snapshot.remove_bg;
 			this.wm_enabled = !!snapshot.watermark_enabled;
 			this.comments_enabled_default = !!snapshot.comments_enabled;
-			this.resize_enabled_default = !!snapshot.resize_enabled;
 			if (this.local_watermark_settings && snapshot.watermark_mode) {
 				this.$set(this.local_watermark_settings, "mode", snapshot.watermark_mode);
-			}
-			if (this.local_resize_settings) {
-				if (snapshot.resize_aspect) {
-					this.$set(this.local_resize_settings, "resize_aspect", snapshot.resize_aspect);
-				}
-				if (snapshot.resize_mode) {
-					this.$set(this.local_resize_settings, "resize_mode", snapshot.resize_mode);
-				}
 			}
 		},
 		_set_wm_field(field, value) {
@@ -902,18 +824,6 @@ export default {
 		_set_comment_default(field, value) {
 			if (!this.local_comment_defaults) return;
 			this.$set(this.local_comment_defaults, field, value);
-		},
-		_set_canvas_aspect(opt) {
-			if (!this.local_resize_settings) return;
-			this.$set(this.local_resize_settings, "resize_aspect", opt);
-		},
-		_set_canvas_mode(opt) {
-			if (!this.local_resize_settings) return;
-			this.$set(this.local_resize_settings, "resize_mode", opt);
-		},
-		_set_canvas_field(field, value) {
-			if (!this.local_resize_settings) return;
-			this.$set(this.local_resize_settings, field, value);
 		},
 
 		// ── Reset / Save-as-default buttons per tab ─────────────────
@@ -1029,33 +939,6 @@ export default {
 			});
 		},
 
-		_reset_canvas_default() {
-			if (!this.resize_settings) return;
-			this.local_resize_settings = JSON.parse(JSON.stringify(this.resize_settings));
-			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
-		},
-		_save_canvas_default() {
-			const r = this.local_resize_settings;
-			if (!r) return;
-			frappe.call({
-				method: "frappe.client.set_value",
-				args: {
-					doctype: "Image Processing Settings",
-					name: "Image Processing Settings",
-					fieldname: {
-						resize_enabled: this.resize_enabled_default ? 1 : 0,
-						resize_aspect: r.resize_aspect || "1:1",
-						resize_mode: r.resize_mode || "Contain",
-						resize_fill_color: r.resize_fill_color || "#FFFFFF",
-						resize_flatten_rgb: r.resize_flatten_rgb !== false ? 1 : 0,
-					},
-				},
-			}).then(() => {
-				frappe.show_alert({ message: __("Canvas defaults saved"), indicator: "green" });
-			}).catch(() => {
-				frappe.show_alert({ message: __("Failed to save defaults"), indicator: "red" });
-			});
-		},
 		dragover() {
 			this.is_dragging = true;
 		},
@@ -1151,11 +1034,17 @@ export default {
 			}
 
 			this.files = this.files.concat(files);
-			// if only one file is allowed and crop_image_aspect_ratio is set, open cropper immediately
+			// Single-file single-image flow: auto-open the cropper if we
+			// have any image-processing feature enabled (Remove BG / Watermark /
+			// Canvas / Comments) OR a fixed aspect restriction. Originally the
+			// gate was "aspect restriction set" — but once we removed the
+			// forced 1:1 on attach_doc_image, single-item uploads started
+			// skipping the cropper straight to Step 3. Re-use
+			// any_feature_shown so any opt-in feature triggers the cropper.
 			if (
 				this.files.length === 1 &&
 				!this.allow_multiple &&
-				this.restrictions.crop_image_aspect_ratio != null
+				(this.restrictions.crop_image_aspect_ratio != null || this.any_feature_shown)
 			) {
 				if (!this.files[0].file_obj.type.includes("svg")) {
 					this.toggle_image_cropper(0);
