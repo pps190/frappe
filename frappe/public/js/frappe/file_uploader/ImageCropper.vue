@@ -380,19 +380,23 @@
 									@input="wm_size = parseFloat($event.target.value)" />
 								<span class="wm-slider-value">{{ Math.round(wm_size) }}%</span>
 							</div>
+							<!-- Position is a free number input (no clamp):
+							     values <0 or >100 place the watermark outside
+							     the image. Users mostly position via drag on
+							     the canvas; the input is for precise entry. -->
 							<div class="wm-slider-row">
 								<label class="wm-slider-label">{{ __("Position X") }}</label>
-								<input type="range" class="wm-slider" min="0" max="100"
-									:value="wm_pos_x"
-									@input="wm_pos_x = parseFloat($event.target.value)" />
-								<span class="wm-slider-value">{{ Math.round(wm_pos_x) }}%</span>
+								<input type="number" class="wm-input wm-num-input" step="1"
+									:value="Math.round(wm_pos_x)"
+									@input="wm_pos_x = parseFloat($event.target.value) || 0" />
+								<span class="wm-slider-value">%</span>
 							</div>
 							<div class="wm-slider-row">
 								<label class="wm-slider-label">{{ __("Position Y") }}</label>
-								<input type="range" class="wm-slider" min="0" max="100"
-									:value="wm_pos_y"
-									@input="wm_pos_y = parseFloat($event.target.value)" />
-								<span class="wm-slider-value">{{ Math.round(wm_pos_y) }}%</span>
+								<input type="number" class="wm-input wm-num-input" step="1"
+									:value="Math.round(wm_pos_y)"
+									@input="wm_pos_y = parseFloat($event.target.value) || 0" />
+								<span class="wm-slider-value">%</span>
 							</div>
 							<div class="wm-slider-row">
 								<label class="wm-slider-label">{{ __("Rotation") }}</label>
@@ -533,18 +537,19 @@
 										@click="_update_comment(i, 'align', a)"
 									>{{ a.charAt(0) }}</button>
 								</div>
+								<!-- No min/max on position: boxes can sit outside
+								     the image (negative or >100). Same freedom as
+								     the crop rect. -->
 								<label class="comment-control">
 									<span>X%</span>
-									<input type="number" class="wm-input comment-num-input"
-										min="0" max="100" step="1"
+									<input type="number" class="wm-input comment-num-input" step="1"
 										:value="Math.round(box.position_x_pct)"
 										@input="_update_comment(i, 'position_x_pct', parseFloat($event.target.value) || 0)"
 									/>
 								</label>
 								<label class="comment-control">
 									<span>Y%</span>
-									<input type="number" class="wm-input comment-num-input"
-										min="0" max="100" step="1"
+									<input type="number" class="wm-input comment-num-input" step="1"
 										:value="Math.round(box.position_y_pct)"
 										@input="_update_comment(i, 'position_y_pct', parseFloat($event.target.value) || 0)"
 									/>
@@ -1646,8 +1651,9 @@ export default {
 			const dy = e.clientY - start.clientY;
 			const dxPct = (dx / cd.width) * 100;
 			const dyPct = (dy / cd.height) * 100;
-			const newX = Math.max(0, Math.min(100, start.origXPct + dxPct));
-			const newY = Math.max(0, Math.min(100, start.origYPct + dyPct));
+			// No clamp — boxes can be dragged outside the image.
+			const newX = start.origXPct + dxPct;
+			const newY = start.origYPct + dyPct;
 			this.$set(this.comment_boxes, i, {
 				...box,
 				position_x_pct: newX,
@@ -2401,8 +2407,10 @@ export default {
 			const mx = e.clientX - rect.left;
 			const my = e.clientY - rect.top;
 			const cd = this.cropper.getCanvasData();
-			this.wm_pos_x = Math.max(0, Math.min(100, ((mx - this.wm_drag_offset_x - cd.left) / cd.width) * 100));
-			this.wm_pos_y = Math.max(0, Math.min(100, ((my - this.wm_drag_offset_y - cd.top) / cd.height) * 100));
+			// No clamp — watermark can sit outside the image (same model
+			// as the crop box, which also allows negative coords).
+			this.wm_pos_x = ((mx - this.wm_drag_offset_x - cd.left) / cd.width) * 100;
+			this.wm_pos_y = ((my - this.wm_drag_offset_y - cd.top) / cd.height) * 100;
 			this.wm_draw();
 		},
 		on_wrapper_mouseup() {
@@ -2456,20 +2464,20 @@ export default {
 			const mx = touch.clientX - rect.left;
 			const my = touch.clientY - rect.top;
 			const cd = this.cropper.getCanvasData();
-			this.wm_pos_x = Math.max(0, Math.min(100, ((mx - this.wm_drag_offset_x - cd.left) / cd.width) * 100));
-			this.wm_pos_y = Math.max(0, Math.min(100, ((my - this.wm_drag_offset_y - cd.top) / cd.height) * 100));
+			this.wm_pos_x = ((mx - this.wm_drag_offset_x - cd.left) / cd.width) * 100;
+			this.wm_pos_y = ((my - this.wm_drag_offset_y - cd.top) / cd.height) * 100;
 			this.wm_draw();
 		},
 
 		// Watermark control panel methods
 		wm_set_pos_x(val) {
 			if (isNaN(val)) return;
-			this.wm_pos_x = Math.max(0, Math.min(100, val));
+			this.wm_pos_x = val;
 			this.wm_draw();
 		},
 		wm_set_pos_y(val) {
 			if (isNaN(val)) return;
-			this.wm_pos_y = Math.max(0, Math.min(100, val));
+			this.wm_pos_y = val;
 			this.wm_draw();
 		},
 		wm_set_size(val) {
@@ -2899,6 +2907,22 @@ img {
 	font-variant-numeric: tabular-nums;
 	font-weight: 500;
 }
+.wm-slider-row .wm-num-input {
+	flex: 1;
+	min-width: 0;
+	max-width: 120px;
+	height: 28px;
+	padding: 2px 8px;
+	font-size: 14px;
+	border: 1px solid #dcdfe6;
+	border-radius: 4px;
+}
+.wm-slider-row .wm-num-input::-webkit-inner-spin-button,
+.wm-slider-row .wm-num-input::-webkit-outer-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+.wm-slider-row .wm-num-input { -moz-appearance: textfield; }
 
 /* ── Mobile: stack left + right columns ──
    At ≤900px the outer grid collapses to one column. Cropper keeps
