@@ -1503,12 +1503,21 @@ export default {
 			};
 		},
 		comment_text_style(box) {
-			const cd = this.canvas_data;
-			// Compute px font size from the displayed image height, not
-			// the natural size (so on-screen text matches what user sees
-			// in the preview).
-			const displayH = (cd && cd.height) ? cd.height : 200;
-			const fontPx = Math.max(6, Math.round(displayH * (box.font_size_pct || 5.0) / 100));
+			// Font size basis = CROP display height × pct, matching the
+			// server-side bake (which uses the cropped image's height).
+			// Using the full image's display height would make overlay
+			// text appear smaller than the preview whenever the crop
+			// rect is shorter than the whole image.
+			let basisPx = 200;
+			try {
+				if (this.cropper) {
+					const cropDisplay = this.cropper.getCropBoxData();
+					if (cropDisplay && cropDisplay.height > 0) {
+						basisPx = cropDisplay.height;
+					}
+				}
+			} catch (e) { /* pre-ready */ }
+			const fontPx = Math.max(6, Math.round(basisPx * (box.font_size_pct || 5.0) / 100));
 			return {
 				fontFamily: `"${box.font_family || "Arial"}", sans-serif`,
 				fontSize: fontPx + "px",
@@ -2045,9 +2054,12 @@ export default {
 			// is explicitly on — that's the one case where transparency
 			// is baked to a solid color and JPEG's compression wins.
 			try {
-				const flatten = this.show_resize && this.resize_enabled && this.resize_flatten_rgb;
-				const fmt = flatten ? "image/jpeg" : "image/png";
-				this.preview_data_url = final_canvas.toDataURL(fmt, 0.88);
+				// Preview is always PNG — lossless colour, so the thumb
+				// matches the workspace exactly. JPEG branch was an
+				// optimisation for flattened Canvas output but it shifted
+				// colours relative to the cropper, making the preview
+				// look "different" even when nothing actually changed.
+				this.preview_data_url = final_canvas.toDataURL("image/png");
 			} catch (e) {
 				// toDataURL can throw on huge canvases; fall back to null
 				this.preview_data_url = null;
@@ -3957,18 +3969,12 @@ img {
 	z-index: 2049 !important;
 }
 .el-image-viewer__canvas .el-image-viewer__img {
-	/* Checkerboard baked into the img element so PNG transparency is
-	   visible in the lightbox. The img has its own pixel data on top,
-	   so the checker only shows through transparent regions — same
-	   pattern Photoshop / Figma / Photopea use for transparent view. */
-	background-color: #ffffff;
-	background-image:
-		linear-gradient(45deg, #d1d5db 25%, transparent 25%),
-		linear-gradient(-45deg, #d1d5db 25%, transparent 25%),
-		linear-gradient(45deg, transparent 75%, #d1d5db 75%),
-		linear-gradient(-45deg, transparent 75%, #d1d5db 75%);
-	background-size: 20px 20px;
-	background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+	/* Match the cropper workspace backdrop (#2c2c2c) so what the user
+	   sees in the thumb/lightbox is identical in colour to the cropper
+	   stage. No white fill and no checkerboard — the workspace itself
+	   doesn't show one either; the dark backdrop reads as "this area
+	   is transparent" by convention. */
+	background-color: #2c2c2c;
 	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
 	border-radius: 4px;
 }
