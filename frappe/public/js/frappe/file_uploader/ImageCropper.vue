@@ -2022,20 +2022,39 @@ export default {
 			const scale_y = ch / crop_h;
 
 			if (this.wm_mode === "Tiled") {
-				const tile_w = (this.wm_tile_size / 100) * full_w * scale_x;
-				const tile_h = tile_w * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
-				const spacing_x = (this.wm_tile_spacing / 100) * full_w * scale_x;
-				const spacing_y = (this.wm_tile_spacing / 100) * full_h * scale_y;
-				const step_x = tile_w + spacing_x;
-				const step_y = tile_h + spacing_y;
+				// Tile size & spacing are a % of the source image's natural
+				// width, then scaled into output-canvas pixels via scale_x.
+				// Matches the overlay which anchors to getCanvasData (=
+				// naturalWidth × zoom) → WYSIWYG. Crop size and padding
+				// don't change tile dimensions; they just open a different
+				// window onto the same pattern.
+				const tile_w_natural = (this.wm_tile_size / 100) * full_w;
+				const tile_h_natural = tile_w_natural * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
+				const spacing_natural = (this.wm_tile_spacing / 100) * full_w;
+				const tile_w = tile_w_natural * scale_x;
+				const tile_h = tile_h_natural * scale_y;
+				const step_x = tile_w + spacing_natural * scale_x;
+				const step_y = tile_h + spacing_natural * scale_y;
 				const angle = (this.wm_tile_rotation * Math.PI) / 180;
+				// Pattern origin = center of the full source image projected
+				// into output coords. Keeps tile phase stable across crops
+				// (move the crop box → same tile positions relative to the
+				// image, not re-centered to the crop).
+				const origin_x = (full_w / 2 - crop_x) * scale_x;
+				const origin_y = (full_h / 2 - crop_y) * scale_y;
 				ctx.save();
 				ctx.globalAlpha = this.wm_tile_opacity / 100;
-				ctx.translate(cw / 2, ch / 2);
+				ctx.translate(origin_x, origin_y);
 				ctx.rotate(angle);
-				const diag = Math.sqrt(cw * cw + ch * ch);
-				for (let y = -diag; y < diag; y += step_y) {
-					for (let x = -diag; x < diag; x += step_x) {
+				// Reach must cover every corner of the output canvas from
+				// the (possibly off-canvas) image center.
+				const max_dist = Math.sqrt(
+					Math.max(origin_x, cw - origin_x) ** 2 +
+					Math.max(origin_y, ch - origin_y) ** 2
+				);
+				const reach = max_dist + Math.max(tile_w, tile_h);
+				for (let y = -reach; y < reach; y += step_y) {
+					for (let x = -reach; x < reach; x += step_x) {
 						ctx.drawImage(this.wm_img, x, y, tile_w, tile_h);
 					}
 				}
@@ -2180,11 +2199,24 @@ export default {
 			const ch = canvas.height;
 			ctx.clearRect(0, 0, cw, ch);
 
-			const cd = this.cropper.getCanvasData();
-
 			if (this.wm_mode === "Tiled") {
-				this.wm_draw_tiled(ctx, cd);
+				// Tile size is anchored to the image's natural width (via
+				// getCanvasData, which is naturalWidth × zoom), NOT the
+				// crop box. That way:
+				//   • Changing Auto-crop padding only moves/resizes the
+				//     crop window — the watermark pattern behind it stays
+				//     put. User sees the same tiles through a different
+				//     hole.
+				//   • Zooming the image scales the tiles with it (they're
+				//     part of the image's coord space).
+				// Tiles cover the ENTIRE overlay canvas so that any crop
+				// region the user ends up choosing shows watermark.
+				const cd = this.cropper.getCanvasData();
+				this.wm_draw_tiled(ctx, cd, cw, ch);
 			} else {
+				// Corner watermark is anchored to the image (so it moves
+				// with the product, not with the crop frame).
+				const cd = this.cropper.getCanvasData();
 				this.wm_draw_corner(ctx, cd);
 			}
 		},
@@ -2230,26 +2262,40 @@ export default {
 			}
 			ctx.restore();
 		},
-		wm_draw_tiled(ctx, cd) {
+		wm_draw_tiled(ctx, cd, container_w, container_h) {
+			// Tile dimensions are % of the image's displayed natural width
+			// (cd = cropper.getCanvasData() → naturalWidth × zoom). Spacing
+			// uses the same basis so aspect-ratio changes of the image
+			// don't warp the tile grid.
 			const tile_w = (this.wm_tile_size / 100) * cd.width;
 			const tile_h = tile_w * (this.wm_img.naturalHeight / this.wm_img.naturalWidth);
-			const spacing_x = (this.wm_tile_spacing / 100) * cd.width;
-			const spacing_y = (this.wm_tile_spacing / 100) * cd.height;
-			const step_x = tile_w + spacing_x;
-			const step_y = tile_h + spacing_y;
+			const spacing = (this.wm_tile_spacing / 100) * cd.width;
+			const step_x = tile_w + spacing;
+			const step_y = tile_h + spacing;
 			const angle = (this.wm_tile_rotation * Math.PI) / 180;
 
 			ctx.save();
 			ctx.globalAlpha = this.wm_tile_opacity / 100;
-			// Rotate around image center
-			const cx = cd.left + cd.width / 2;
-			const cy = cd.top + cd.height / 2;
-			ctx.translate(cx, cy);
+			// Pattern is anchored to the image's center (cd.left, cd.top is
+			// the image's top-left in container coords). Rotating about this
+			// origin means changing the crop window — via Auto-crop padding
+			// or moving the box — just reveals a different portion of the
+			// same stationary pattern. WYSIWYG with the bake path.
+			const ox = cd.left + cd.width / 2;
+			const oy = cd.top + cd.height / 2;
+			ctx.translate(ox, oy);
 			ctx.rotate(angle);
 
-			const diag = Math.sqrt(cd.width * cd.width + cd.height * cd.height);
-			for (let y = -diag; y < diag; y += step_y) {
-				for (let x = -diag; x < diag; x += step_x) {
+			// Reach from the image center out to the farthest container
+			// corner, so tiles cover the whole overlay (crop box can sit
+			// anywhere and still land on watermarked pixels).
+			const max_dist = Math.sqrt(
+				Math.max(ox, container_w - ox) ** 2 +
+				Math.max(oy, container_h - oy) ** 2
+			);
+			const reach = max_dist + Math.max(tile_w, tile_h);
+			for (let y = -reach; y < reach; y += step_y) {
+				for (let x = -reach; x < reach; x += step_x) {
 					ctx.drawImage(this.wm_img, x, y, tile_w, tile_h);
 				}
 			}
