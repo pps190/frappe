@@ -38,10 +38,13 @@
 						<input type="checkbox" v-model="solid_background" />
 						<span>{{ __("Solid bg") }}</span>
 					</label>
+					<!-- Colour picker is always visible so the user can pre-set
+					     the colour without first flipping the toggle. Dimmed
+					     when the toggle is off to signal it's inactive. -->
 					<input
-						v-if="solid_background"
 						type="color"
 						class="cropper-toolbar-colour"
+						:class="{ 'is-dim': !solid_background }"
 						v-model="background_color"
 						:title="__('Background colour')"
 					/>
@@ -841,6 +844,12 @@ export default {
 		this.nobg_bbox = this.file._nobg_bbox || null;
 		this.nobg_natural_size = this.file._nobg_natural_size || null;
 		this.file._original_file = this.original_file;
+		// Restore any padding-slider override the user dragged before
+		// hitting Crop the last time — lives on the file so it survives
+		// Step 2 ↔ Step 3 round-trips like nobg_* above.
+		if (this.file._padding_pct_override != null) {
+			this.local_padding_pct = this.file._padding_pct_override;
+		}
 
 		if (this.remove_bg_checked && this.nobg_file) {
 			this.bg_removed = true;
@@ -1157,6 +1166,19 @@ export default {
 							!this.file.crop_box_data
 						) {
 							this._apply_auto_crop();
+						} else if (crop_box) {
+							// Re-mounting a cropper that was already cropped once
+							// (user hit Back from Step 3). CropperJS applies
+							// crop_box as natural-image-coords rect via `data:`
+							// above, but it doesn't zoom to make that rect
+							// visibly fill the workspace — default zoom fits
+							// the whole image, leaving the tight crop box
+							// floating tiny in a sea of solid-bg pixels. Auto-
+							// zoom the display so the restored crop rect sits
+							// comfortably in view like when it was first made.
+							this.$nextTick(() => {
+								this._zoom_to_fit_rect(crop_box, 0.12);
+							});
 						}
 						if (this.wm_enabled && this.wm_loaded) {
 							this.$nextTick(() => this.wm_resize_canvas());
@@ -1319,12 +1341,14 @@ export default {
 			if (!Number.isFinite(val)) return;
 			// Clamp to slider bounds
 			this.local_padding_pct = Math.max(-20, Math.min(40, val));
+			this.file._padding_pct_override = this.local_padding_pct;
 			if (this.bg_removed && this.nobg_bbox && this.cropper) {
 				this._apply_auto_crop();
 			}
 		},
 		reset_padding_pct() {
 			this.local_padding_pct = null;
+			this.file._padding_pct_override = null;
 			if (this.bg_removed && this.nobg_bbox && this.cropper) {
 				this._apply_auto_crop();
 			}
@@ -2657,22 +2681,45 @@ export default {
 	align-items: center;
 	gap: 6px;
 	margin: 0;
+	padding: 4px 10px;
 	font-size: 12px;
-	color: #303133;
+	font-weight: 500;
+	color: #606266;
+	border: 1px solid #dcdfe6;
+	border-radius: 4px;
+	background: white;
 	cursor: pointer;
 	user-select: none;
+	transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.cropper-toolbar-toggle:hover {
+	border-color: var(--primary, #2563eb);
+	color: var(--primary, #2563eb);
+}
+.cropper-toolbar-toggle:has(input:checked) {
+	background: var(--primary-light, #ecf5ff);
+	border-color: var(--primary, #2563eb);
+	color: var(--primary, #2563eb);
 }
 .cropper-toolbar-toggle input[type="checkbox"] {
 	margin: 0;
+	accent-color: var(--primary, #2563eb);
 }
 .cropper-toolbar-colour {
-	width: 26px;
-	height: 26px;
+	width: 28px;
+	height: 28px;
 	padding: 0;
 	border: 1px solid #dcdfe6;
 	border-radius: 4px;
 	background: white;
 	cursor: pointer;
+	transition: opacity 0.12s, border-color 0.12s;
+}
+.cropper-toolbar-colour.is-dim {
+	opacity: 0.45;
+}
+.cropper-toolbar-colour:hover {
+	border-color: var(--primary, #2563eb);
 }
 .cropper-toolbar-save {
 	flex-shrink: 0;
