@@ -1179,6 +1179,17 @@ export default {
 					viewMode: 0,
 					zoomable: true,
 					scalable: false,
+					// Let the user zoom the image all the way down to a
+					// speck — we don't want CropperJS clamping the crop
+					// box back into the container when the image becomes
+					// smaller than the workspace. Crop rect is authored
+					// in natural-image coords and stays put regardless.
+					minContainerWidth: 0,
+					minContainerHeight: 0,
+					minCanvasWidth: 0,
+					minCanvasHeight: 0,
+					minCropBoxWidth: 0,
+					minCropBoxHeight: 0,
 					// Our zoom toolbar + on_wrapper_wheel handle wheel/pinch
 					// explicitly (via _zoom_preserving_crop), so CropperJS's
 					// own wheel/touch zoom is turned off to avoid two code
@@ -2375,7 +2386,12 @@ export default {
 			fn();
 			// The zoom action mutates container metrics synchronously;
 			// setData right after re-draws the crop box to match the
-			// saved natural rect at the new display scale.
+			// saved natural rect at the new display scale. Note:
+			// CropperJS still clamps the crop box to container bounds
+			// inside renderCropBox, so zooming out past the point where
+			// the saved rect would exceed the container will shrink it —
+			// that's a CropperJS constraint, not something we work
+			// around here.
 			this.cropper.setData(saved);
 		},
 		zoom_by(delta) {
