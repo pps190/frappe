@@ -1191,8 +1191,13 @@ export default {
 					viewMode: 0,
 					zoomable: true,
 					scalable: false,
-					zoomOnTouch: true,
-					zoomOnWheel: true,
+					// Our zoom toolbar + on_wrapper_wheel handle wheel/pinch
+					// explicitly (via _zoom_preserving_crop), so CropperJS's
+					// own wheel/touch zoom is turned off to avoid two code
+					// paths with different behaviour (native path doesn't
+					// track the crop box, ours does).
+					zoomOnTouch: false,
+					zoomOnWheel: false,
 					wheelZoomRatio: 0.1,
 					autoCropArea: 1,
 					data: crop_box,
@@ -2269,20 +2274,37 @@ export default {
 		},
 
 		// ── Zoom controls (viewMode:0 workspace) ──
-		// cropper.zoom(ratio) is relative (delta); zoomTo(absolute) sets
-		// display/natural. "Fit" recenters + fits the image into the
-		// container via cropper.reset(), matching the initial mount state.
-		zoom_by(delta) {
+		// cropper.zoom(delta) scales the image, but CropperJS natively
+		// leaves the crop box's SCREEN pixels alone — that yields the
+		// disconcerting "image grows inside a static frame" effect. We
+		// want the crop box to follow the image (same natural-image
+		// footprint, visually growing/shrinking with the picture) so the
+		// user can keep zooming without their framing drifting.
+		//
+		// Approach: snapshot getData() (crop rect in natural-image px,
+		// independent of zoom) before zooming, then setData() after the
+		// zoom settles. CropperJS re-projects the saved natural rect at
+		// the new zoom level, so the crop box tracks the image 1:1.
+		_zoom_preserving_crop(fn) {
 			if (!this.cropper) return;
-			this.cropper.zoom(delta);
+			const saved = this.cropper.getData();
+			fn();
+			// The zoom action mutates container metrics synchronously;
+			// setData right after re-draws the crop box to match the
+			// saved natural rect at the new display scale.
+			this.cropper.setData(saved);
+		},
+		zoom_by(delta) {
+			this._zoom_preserving_crop(() => this.cropper.zoom(delta));
 		},
 		zoom_fit() {
 			if (!this.cropper) return;
+			// reset() resets both image position AND crop box — the
+			// explicit "Fit" action, closest to the initial mount state.
 			this.cropper.reset();
 		},
 		zoom_actual() {
-			if (!this.cropper) return;
-			this.cropper.zoomTo(1);
+			this._zoom_preserving_crop(() => this.cropper.zoomTo(1));
 		},
 
 		set_mode(mode) {
@@ -2341,12 +2363,25 @@ export default {
 			this.wm_dragging = false;
 		},
 		on_wrapper_wheel(e) {
-			if (this.interaction_mode !== "watermark") return;
-			if (this.wm_mode !== "Corner") return;
-			if (!this.wm_enabled || !this.wm_loaded) return;
-			const delta = e.deltaY > 0 ? -1 : 1;
-			this.wm_size = Math.max(5, Math.min(100, this.wm_size + delta));
-			this.wm_draw();
+			// Watermark Corner mode: wheel resizes the draggable logo
+			// (size %). Keep the original behaviour.
+			if (this.interaction_mode === "watermark"
+				&& this.wm_mode === "Corner"
+				&& this.wm_enabled
+				&& this.wm_loaded) {
+				const delta = e.deltaY > 0 ? -1 : 1;
+				this.wm_size = Math.max(5, Math.min(100, this.wm_size + delta));
+				this.wm_draw();
+				return;
+			}
+			// Crop mode (default): wheel zooms the stage. Delta matches
+			// CropperJS's wheelZoomRatio of 0.1, and we route through
+			// _zoom_preserving_crop so the crop box tracks the image
+			// — consistent with the +/- toolbar buttons.
+			if (this.cropper) {
+				const step = e.deltaY > 0 ? -0.1 : 0.1;
+				this._zoom_preserving_crop(() => this.cropper.zoom(step));
+			}
 		},
 		on_wrapper_touchstart(e) {
 			if (this.interaction_mode !== "watermark") return;
