@@ -1,10 +1,16 @@
 <template>
 	<div
 		class="file-uploader"
+		:class="{
+			'fu-with-panel': any_feature_shown && !show_image_cropper && !show_file_browser && !show_web_link,
+			'fu-cropper-mode': show_image_cropper,
+		}"
 		@dragover.prevent="dragover"
 		@dragleave.prevent="dragleave"
 		@drop.prevent="dropfiles"
 	>
+		<!-- LEFT COLUMN: dropzone (step 1) OR file list (step 3) -->
+		<div class="fu-left-col">
 		<div
 			class="file-upload-area"
 			v-show="files.length === 0 && !show_file_browser && !show_web_link"
@@ -214,20 +220,306 @@
 				</div>
 			</div>
 		</div>
+		</div><!-- /.fu-left-col -->
+
+		<!-- RIGHT COLUMN: feature tabs + pane OR recap card
+		     Only rendered outside the cropper step (cropper has its own
+		     identical panel). Hidden entirely when no feature was
+		     requested, so non-image uploads keep the simple single-column
+		     layout that Frappe's default uploader has. -->
+		<div
+			class="fu-right-col"
+			v-if="any_feature_shown && !show_image_cropper && !show_file_browser && !show_web_link"
+		>
+			<!-- Step 3 (files added, crop committed): read-only recap.
+			     Prefers last_crop_settings (populated by @crop_committed so
+			     the recap reflects the exact state baked into the file)
+			     and falls back to the Step 1 default toggles when the user
+			     hasn't cropped yet (e.g. they skipped the cropper on a
+			     non-image file). -->
+			<template v-if="files.length > 0">
+				<div class="fu-recap-card">
+					<div class="fu-recap-title">{{ __("Applied to your image") }}</div>
+					<div class="fu-recap-hint">{{ __("Locked in at the Crop step — reopen the cropper to change these.") }}</div>
+					<ul class="fu-recap-list">
+						<li v-if="show_remove_bg" :class="{ off: !recap.remove_bg }">
+							<span class="fu-recap-dot" :class="recap.remove_bg ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Remove Background") }}</span>
+							<span class="fu-recap-value">{{ recap.remove_bg ? __("on") : __("off") }}</span>
+						</li>
+						<li v-if="show_watermark" :class="{ off: !recap.watermark_enabled }">
+							<span class="fu-recap-dot" :class="recap.watermark_enabled ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Watermark") }}</span>
+							<span class="fu-recap-value">
+								{{ recap.watermark_enabled ? (recap.watermark_mode || "Tiled") : __("off") }}
+							</span>
+						</li>
+						<li v-if="show_comments" :class="{ off: !recap.comments_enabled }">
+							<span class="fu-recap-dot" :class="recap.comments_enabled ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Comments") }}</span>
+							<span class="fu-recap-value">
+								{{ recap.comments_enabled
+									? (recap.comment_count ? __("{0} boxes", [recap.comment_count]) : __("on"))
+									: __("off") }}
+							</span>
+						</li>
+						<li>
+							<span class="fu-recap-dot on"></span>
+							<span class="fu-recap-label">{{ __("Crop ratio") }}</span>
+							<span class="fu-recap-value">{{ recap.crop_aspect || "Free" }}</span>
+						</li>
+						<li :class="{ off: !recap.solid_background }">
+							<span class="fu-recap-dot" :class="recap.solid_background ? 'on' : 'off'"></span>
+							<span class="fu-recap-label">{{ __("Solid background") }}</span>
+							<span class="fu-recap-value">
+								<template v-if="recap.solid_background">
+									<span
+										class="fu-recap-swatch"
+										:style="{ backgroundColor: recap.background_color || '#FFFFFF' }"
+									></span>
+									{{ recap.background_color || "#FFFFFF" }}
+								</template>
+								<template v-else>{{ __("off") }}</template>
+							</span>
+						</li>
+					</ul>
+				</div>
+			</template>
+
+			<!-- Step 1 (no files yet): interactive 4-tab panel — reuses
+			     the cropper's existing .cropper-feature-tabs / .cropper-tab-*
+			     / .wm-slider-row / .segmented-tabs / .wm-panel-actions classes
+			     so Step 1 and Step 2 are visually identical, driven by ONE
+			     stylesheet. -->
+			<template v-else>
+				<div class="cropper-feature-tabs" role="tablist">
+					<button
+						v-for="tab in available_tabs"
+						:key="tab.key"
+						type="button"
+						class="cropper-feature-tab"
+						:class="{ active: active_tab === tab.key }"
+						role="tab"
+						:aria-selected="active_tab === tab.key"
+						@click.stop.prevent="_switch_tab(tab.key)"
+					>
+						<span class="cropper-feature-tab-label">{{ tab.label }}</span>
+						<span class="cropper-feature-tab-state" :class="tab.on ? 'on' : 'off'">
+							<span class="cropper-feature-tab-dot"></span>
+							{{ tab.on ? __("on") : __("off") }}
+						</span>
+					</button>
+				</div>
+
+				<div class="cropper-tab-body">
+					<!-- ── REMOVE BG pane ── -->
+					<div v-show="active_tab === 'remove_bg'" class="cropper-tab-pane">
+						<div class="cropper-tab-enable">
+							<span class="cropper-tab-enable-label">{{ __("Enable Remove Background") }}</span>
+							<div
+								class="toggle-pill toggle-pill-compact"
+								:class="{ active: remove_bg_checked, 'is-disabled': !!remove_bg_disabled_hint }"
+								@click="!remove_bg_disabled_hint && (remove_bg_checked = !remove_bg_checked)"
+							>
+								<span class="toggle-pill-switch">
+									<span class="toggle-pill-track" :class="{ on: remove_bg_checked && !remove_bg_disabled_hint }">
+										<span class="toggle-pill-thumb"></span>
+									</span>
+								</span>
+							</div>
+						</div>
+						<div v-if="remove_bg_disabled_hint" class="adjustments-row adjustments-warn">
+							{{ remove_bg_disabled_hint }}
+							<a v-if="remove_bg_disabled_link" :href="remove_bg_disabled_link">{{ __("Configure") }}</a>
+						</div>
+						<div v-else-if="remove_bg_checked" class="adjustments-row">
+							<div class="wm-slider-row">
+								<label class="wm-slider-label">{{ __("Auto-crop padding") }}</label>
+								<input type="range" class="wm-slider" min="-20" max="40" step="1"
+									:value="step1_padding_pct"
+									@input="step1_padding_pct = parseInt($event.target.value)" />
+								<span class="wm-slider-value">{{ step1_padding_pct }}%</span>
+							</div>
+							<div class="wm-panel-actions">
+								<button class="btn btn-xs btn-default" @click="_reset_bg_default">{{ __("Reset") }}</button>
+								<button class="btn btn-xs btn-primary-light" @click="_save_bg_default">{{ __("Save as Default") }}</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- ── WATERMARK pane ── -->
+					<div v-show="active_tab === 'watermark'" class="cropper-tab-pane">
+						<div class="cropper-tab-enable">
+							<span class="cropper-tab-enable-label">{{ __("Enable Watermark") }}</span>
+							<div
+								class="toggle-pill toggle-pill-compact"
+								:class="{ active: wm_enabled, 'is-disabled': !local_watermark_settings || !local_watermark_settings.watermark_image }"
+								@click="(local_watermark_settings && local_watermark_settings.watermark_image) && (wm_enabled = !wm_enabled)"
+							>
+								<span class="toggle-pill-switch">
+									<span class="toggle-pill-track" :class="{ on: wm_enabled }">
+										<span class="toggle-pill-thumb"></span>
+									</span>
+								</span>
+							</div>
+						</div>
+						<div v-if="!local_watermark_settings || !local_watermark_settings.watermark_image" class="adjustments-row adjustments-warn">
+							{{ __("No watermark image uploaded.") }}
+							<a href="/app/watermark-settings">{{ __("Configure") }}</a>
+						</div>
+						<div v-else-if="wm_enabled" class="adjustments-row adjustments-row-wm">
+							<div class="segmented-tabs" role="tablist">
+								<button type="button" class="segmented-tab"
+									:class="{ active: (local_watermark_settings.mode || 'Tiled') === 'Tiled' }"
+									@click="_set_wm_field('mode', 'Tiled')">
+									<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+									{{ __("Tiled") }}
+								</button>
+								<button type="button" class="segmented-tab"
+									:class="{ active: local_watermark_settings.mode === 'Corner' }"
+									@click="_set_wm_field('mode', 'Corner')">
+									<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L12 12"/><rect x="2" y="14" width="10" height="8" rx="1"/></svg>
+									{{ __("Corner") }}
+								</button>
+							</div>
+							<template v-if="(local_watermark_settings.mode || 'Tiled') === 'Tiled'">
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Opacity") }}</label>
+									<input type="range" class="wm-slider" min="5" max="100"
+										:value="local_watermark_settings.tile_opacity || 12"
+										@input="_set_wm_field('tile_opacity', parseInt($event.target.value))" />
+									<span class="wm-slider-value">{{ local_watermark_settings.tile_opacity || 12 }}%</span>
+								</div>
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Tile Size") }}</label>
+									<input type="range" class="wm-slider" min="5" max="80"
+										:value="local_watermark_settings.tile_size || 15"
+										@input="_set_wm_field('tile_size', parseFloat($event.target.value))" />
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.tile_size || 15) }}%</span>
+								</div>
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Rotation") }}</label>
+									<input type="range" class="wm-slider" min="-180" max="180"
+										:value="local_watermark_settings.tile_rotation != null ? local_watermark_settings.tile_rotation : -30"
+										@input="_set_wm_field('tile_rotation', parseInt($event.target.value))" />
+									<span class="wm-slider-value">{{ local_watermark_settings.tile_rotation != null ? local_watermark_settings.tile_rotation : -30 }}°</span>
+								</div>
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Spacing") }}</label>
+									<input type="range" class="wm-slider" min="0" max="100"
+										:value="local_watermark_settings.tile_spacing || 40"
+										@input="_set_wm_field('tile_spacing', parseInt($event.target.value))" />
+									<span class="wm-slider-value">{{ local_watermark_settings.tile_spacing || 40 }}%</span>
+								</div>
+							</template>
+							<template v-else>
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Opacity") }}</label>
+									<input type="range" class="wm-slider" min="5" max="100"
+										:value="local_watermark_settings.opacity || 50"
+										@input="_set_wm_field('opacity', parseInt($event.target.value))" />
+									<span class="wm-slider-value">{{ local_watermark_settings.opacity || 50 }}%</span>
+								</div>
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Size") }}</label>
+									<input type="range" class="wm-slider" min="5" max="100"
+										:value="local_watermark_settings.size || 20"
+										@input="_set_wm_field('size', parseFloat($event.target.value))" />
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.size || 20) }}%</span>
+								</div>
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Position X") }}</label>
+									<input type="range" class="wm-slider" min="0" max="100"
+										:value="local_watermark_settings.position_x || 80"
+										@input="_set_wm_field('position_x', parseFloat($event.target.value))" />
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.position_x || 80) }}%</span>
+								</div>
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Position Y") }}</label>
+									<input type="range" class="wm-slider" min="0" max="100"
+										:value="local_watermark_settings.position_y || 90"
+										@input="_set_wm_field('position_y', parseFloat($event.target.value))" />
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.position_y || 90) }}%</span>
+								</div>
+								<div class="wm-slider-row">
+									<label class="wm-slider-label">{{ __("Rotation") }}</label>
+									<input type="range" class="wm-slider" min="-180" max="180" step="5"
+										:value="local_watermark_settings.corner_rotation || 0"
+										@input="_set_wm_field('corner_rotation', parseFloat($event.target.value))" />
+									<span class="wm-slider-value">{{ Math.round(local_watermark_settings.corner_rotation || 0) }}°</span>
+								</div>
+							</template>
+							<div class="wm-panel-actions">
+								<button class="btn btn-xs btn-default" @click="_reset_wm_default">{{ __("Reset") }}</button>
+								<button class="btn btn-xs btn-primary-light" @click="_save_wm_default">{{ __("Save as Default") }}</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- ── COMMENTS pane ──
+					     Reuses the CommentBoxEditor component in sidebar-only
+					     mode (hide-canvas) so Step 1 shares the same list +
+					     per-box form + two-tier Save/Reset as Step 2's cropper
+					     and the batch Header / Row editors. The box list is
+					     carried into the cropper via :initial_comment_boxes,
+					     so any boxes the user builds here are waiting on Step
+					     2 when they pick a file. -->
+					<div v-show="active_tab === 'comments'" class="cropper-tab-pane">
+						<div class="cropper-tab-enable">
+							<span class="cropper-tab-enable-label">{{ __("Enable Comments") }}</span>
+							<div
+								class="toggle-pill toggle-pill-compact"
+								:class="{ active: comments_enabled_default }"
+								@click="comments_enabled_default = !comments_enabled_default"
+							>
+								<span class="toggle-pill-switch">
+									<span class="toggle-pill-track" :class="{ on: comments_enabled_default }">
+										<span class="toggle-pill-thumb"></span>
+									</span>
+								</span>
+							</div>
+						</div>
+						<CommentBoxEditor
+							v-if="comments_enabled_default"
+							hide-canvas
+							:boxes="step1_comment_boxes"
+							:presets="comment_presets || []"
+							:defaults="local_comment_defaults || {}"
+							:enabled="comments_enabled_default"
+							@input="step1_comment_boxes = $event"
+							@change="step1_comment_boxes = $event"
+							@reset-enabled="comments_enabled_default = !!(comment_defaults && comment_defaults.enabled)"
+						/>
+					</div>
+
+				</div>
+			</template>
+		</div><!-- /.fu-right-col -->
+
 		<ImageCropper
 			v-if="show_image_cropper && wrapper_ready"
 			:file="files[crop_image_with_index]"
 			:fixed_aspect_ratio="restrictions.crop_image_aspect_ratio"
 			:show_remove_bg="show_remove_bg && !remove_bg_disabled_hint"
 			:remove_bg_checked="remove_bg_checked"
-			:remove_bg_padding_pct="remove_bg_padding_pct"
+			:remove_bg_padding_pct="step1_padding_pct"
+			:default_crop_aspect="local_crop_aspect"
+			:default_solid_background="local_solid_background"
+			:default_background_color="local_background_color"
 			:show_watermark="show_watermark"
-			:watermark_settings="watermark_settings"
+			:watermark_settings="local_watermark_settings"
 			:wm_default_enabled="wm_enabled"
+			:show_comments="show_comments"
+			:comment_defaults="local_comment_defaults"
+			:comment_presets="comment_presets"
+			:comments_default_enabled="comments_enabled_default"
+			:initial_comment_boxes="step1_comment_boxes"
 			@toggle_image_cropper="toggle_image_cropper(-1)"
 			@upload_after_crop="trigger_upload = true"
 			@remove_bg_changed="remove_bg_checked = $event"
 			@wm_enabled_changed="wm_enabled = $event"
+			@comments_enabled_changed="comments_enabled_default = $event"
+			@crop_committed="_on_crop_committed"
 		/>
 		<FileBrowser
 			ref="file_browser"
@@ -244,6 +536,12 @@ import FileBrowser from "./FileBrowser.vue";
 import WebLink from "./WebLink.vue";
 import GoogleDrivePicker from "../../integrations/google_drive_picker";
 import ImageCropper from "./ImageCropper.vue";
+// Cross-app import: CommentBoxEditor lives in the next app because
+// it's also used by the batch view. esbuild's NODE_PATHS resolves
+// `next/...` at build time. Step 1 renders it in sidebar-only mode
+// (hideCanvas) so users can build the comment list even before an
+// image is picked.
+import CommentBoxEditor from "next/public/js/item_image_batch/CommentBoxEditor.vue";
 
 export default {
 	name: "FileUploader",
@@ -307,10 +605,39 @@ export default {
 		remove_bg_padding_pct: {
 			default: 5,
 		},
+		// Initial crop-box aspect remembered per user in Image Processing
+		// Settings. String form from the settings doc: "Free" | "1:1"
+		// | "4:3" | "16:9". ImageCropper maps to a numeric ratio and
+		// preselects the matching button in its toolbar.
+		default_crop_aspect: {
+			default: "Free",
+		},
+		// Initial Solid Background + colour remembered in Settings. The
+		// cropper exposes a toolbar toggle + colour picker; the active
+		// value is shown live behind the image so users see the output.
+		default_solid_background: {
+			default: false,
+		},
+		default_background_color: {
+			default: "#FFFFFF",
+		},
 		show_watermark: {
 			default: false,
 		},
 		watermark_settings: {
+			default: null,
+		},
+		// Comments (new 2026-04) — show the text-overlay list editor in
+		// the Cropper. comment_defaults = default style for new boxes;
+		// comment_presets = quick-insert library from Image Processing
+		// Settings.
+		show_comments: {
+			default: false,
+		},
+		comment_defaults: {
+			default: null,
+		},
+		comment_presets: {
 			default: null,
 		},
 	},
@@ -319,6 +646,7 @@ export default {
 		FileBrowser,
 		WebLink,
 		ImageCropper,
+		CommentBoxEditor,
 	},
 	data() {
 		return {
@@ -340,6 +668,52 @@ export default {
 			wrapper_ready: false,
 			remove_bg_checked: this.remove_bg_default && !this.remove_bg_disabled_hint,
 			wm_enabled: this.watermark_settings && this.watermark_settings.enabled ? true : false,
+			// Pre-cropper toggle for Comments so the file-picker page
+			// exposes the same feature the cropper tab-panel does.
+			comments_enabled_default: !!(this.comment_defaults && this.comment_defaults.enabled),
+			// Step-1 comment box list, seeded from Settings.comment_presets
+			// so "Save as Default" and the initial hydrated list stay in
+			// sync. Any edits here carry over into the cropper's Step 2
+			// via the :initial_comment_boxes prop on ImageCropper.
+			step1_comment_boxes: Array.isArray(this.comment_presets)
+				? this.comment_presets.map((p) => ({ ...p }))
+				: [],
+			// Auto-crop padding — initial value comes from Image Processing
+			// Settings (remove_bg_padding_pct prop). User can override on
+			// Step 1 before picking a file.
+			step1_padding_pct: this.remove_bg_padding_pct != null ? this.remove_bg_padding_pct : 2,
+			// Which right-panel tab is visible on Step 1.
+			active_tab: "remove_bg",
+			// Snapshot of the cropper's final feature states at the moment
+			// the user clicked Crop. Populated by @crop_committed so Step 3's
+			// recap card can display "exactly what was baked" rather than
+			// Step 1's pre-cropper defaults (which may have been edited
+			// inside the cropper).
+			last_crop_settings: null,
+			// ── Local editable copies of settings-prop objects ────────
+			// Props passed from index.js are plain JS objects cached on
+			// frappe._*_cache — NOT Vue-reactive. Mutating them via $set
+			// on a prop doesn't reliably trigger re-renders (Vue 2 warns
+			// "avoid mutating prop" and the parent never observed the
+			// nested keys). We deep-clone into local data so every
+			// <input :value> binding is fully reactive, then pass the
+			// local copy into ImageCropper as the :watermark_settings /
+			// :resize_settings / :comment_defaults props so Step 1 →
+			// Step 2 edits roundtrip cleanly.
+			local_watermark_settings: this.watermark_settings
+				? JSON.parse(JSON.stringify(this.watermark_settings))
+				: null,
+			local_comment_defaults: this.comment_defaults
+				? JSON.parse(JSON.stringify(this.comment_defaults))
+				: null,
+			// Local mirrors of the three Crop-toolbar defaults so we can
+			// update them after every @crop_committed — reopening the
+			// cropper then seeds the toolbar with what the user last
+			// committed, not the original prop value. Props are read-only
+			// in Vue 2, so we need the local copy.
+			local_crop_aspect: this.default_crop_aspect || "Free",
+			local_solid_background: !!this.default_solid_background,
+			local_background_color: this.default_background_color || "#FFFFFF",
 		};
 	},
 	created() {
@@ -388,8 +762,245 @@ export default {
 				this.files.every((file) => file.total !== 0 && file.progress === file.total)
 			);
 		},
+		// At least one of the 4 image-processing features was opted-in by
+		// the caller. Controls whether the right-side panel renders at all
+		// — a plain Attachment upload (no image processing) stays
+		// single-column like the original Frappe uploader.
+		any_feature_shown() {
+			return !!(this.show_remove_bg || this.show_watermark || this.show_comments);
+		},
+		// Step 3 recap view: prefer post-crop snapshot (last_crop_settings)
+		// so it reflects whatever the user committed in the cropper,
+		// falling back to Step 1 defaults before the first crop. One
+		// source so template binds stay readable.
+		recap() {
+			const s = this.last_crop_settings || {};
+			return {
+				remove_bg: s.remove_bg != null ? s.remove_bg : this.remove_bg_checked,
+				watermark_enabled: s.watermark_enabled != null ? s.watermark_enabled : this.wm_enabled,
+				watermark_mode: s.watermark_mode
+					|| (this.local_watermark_settings && this.local_watermark_settings.mode)
+					|| "Tiled",
+				comments_enabled: s.comments_enabled != null ? s.comments_enabled : this.comments_enabled_default,
+				comment_count: s.comment_count || 0,
+				crop_aspect: s.crop_aspect || this.default_crop_aspect || "Free",
+				solid_background: s.solid_background != null
+					? s.solid_background
+					: !!this.default_solid_background,
+				background_color: s.background_color
+					|| this.default_background_color
+					|| "#FFFFFF",
+			};
+		},
+		// Tab objects used by the v-for in the template. Each entry knows
+		// its ON state so the pill header can render the green/grey dot
+		// without the template having to branch on key.
+		available_tabs() {
+			const tabs = [];
+			if (this.show_remove_bg) {
+				tabs.push({
+					key: "remove_bg",
+					label: __("Remove BG"),
+					on: !!this.remove_bg_checked && !this.remove_bg_disabled_hint,
+				});
+			}
+			if (this.show_watermark) {
+				tabs.push({
+					key: "watermark",
+					label: __("Watermark"),
+					on: !!this.wm_enabled,
+				});
+			}
+			if (this.show_comments) {
+				tabs.push({
+					key: "comments",
+					label: __("Comments"),
+					on: !!this.comments_enabled_default,
+				});
+			}
+			return tabs;
+		},
+	},
+	mounted() {
+		// Reset active_tab to the first available feature, so the panel
+		// doesn't land on a tab the consumer didn't opt into.
+		const first = this.available_tabs[0];
+		if (first) this.active_tab = first.key;
 	},
 	methods: {
+		// Step 1 params mutate their underlying settings objects in place
+		// so the cropper — which reads these same objects as props on
+		// mount — picks up the user's choices when they click a File
+		// Source button. All three settings objects (watermark_settings,
+		// resize_settings, comment_defaults) are passed by reference from
+		// index.js, so $set here updates the cropper's initial values.
+
+		_switch_tab(key) {
+			this.active_tab = key;
+		},
+		_on_crop_committed(snapshot) {
+			this.last_crop_settings = snapshot;
+			// Keep Step 1 / recap toggle dots in sync with the cropper's
+			// final state so a user clicking Back (or Crop again after
+			// the cropper re-mounts) sees what they last committed, not
+			// the pre-crop defaults.
+			this.remove_bg_checked = !!snapshot.remove_bg;
+			this.wm_enabled = !!snapshot.watermark_enabled;
+			this.comments_enabled_default = !!snapshot.comments_enabled;
+			// Watermark: merge the full per-slider state into the local
+			// settings object so re-opening the cropper restores exactly
+			// what the user tuned (opacity / size / position / mode / etc.).
+			if (this.local_watermark_settings && snapshot.watermark_state) {
+				const ws = snapshot.watermark_state;
+				Object.keys(ws).forEach((k) => {
+					if (ws[k] != null) {
+						this.$set(this.local_watermark_settings, k, ws[k]);
+					}
+				});
+			} else if (this.local_watermark_settings && snapshot.watermark_mode) {
+				this.$set(this.local_watermark_settings, "mode", snapshot.watermark_mode);
+			}
+			// Comments: carry the full edited box list forward so the next
+			// cropper mount seeds via initial_comment_boxes with what the
+			// user actually wrote, not the original preset library.
+			if (Array.isArray(snapshot.comment_boxes)) {
+				this.step1_comment_boxes = snapshot.comment_boxes.map((b) => ({ ...b }));
+			}
+			// Carry the Crop-toolbar state forward. Without this, reopening
+			// the cropper after Step 3 would reset aspect / solid bg /
+			// colour back to the original Settings-seeded prop values.
+			if (snapshot.crop_aspect) {
+				this.local_crop_aspect = snapshot.crop_aspect;
+			}
+			if (snapshot.solid_background != null) {
+				this.local_solid_background = !!snapshot.solid_background;
+			}
+			if (snapshot.background_color) {
+				this.local_background_color = snapshot.background_color;
+			}
+		},
+		_set_wm_field(field, value) {
+			if (!this.local_watermark_settings) return;
+			this.$set(this.local_watermark_settings, field, value);
+		},
+		_set_comment_default(field, value) {
+			if (!this.local_comment_defaults) return;
+			this.$set(this.local_comment_defaults, field, value);
+		},
+
+		// ── Reset / Save-as-default buttons per tab ─────────────────
+		// Reset reverts the local editable copy to the prop value the
+		// uploader was constructed with (what Settings had at dialog
+		// open). Save persists the current local values back to the
+		// Settings DocType via frappe.client.set_value so future
+		// uploads inherit them.
+
+		_reset_bg_default() {
+			this.step1_padding_pct = this.remove_bg_padding_pct != null
+				? this.remove_bg_padding_pct : 2;
+			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
+		},
+		_save_bg_default() {
+			// Save both the enable toggle AND the padding so "Save as
+			// Default" reflects the full Remove BG tab state. Matches the
+			// behavior of the Canvas tab (which also persists its enable
+			// flag). Remove BG availability on the site might still
+			// override this to false at load time if the microservice
+			// isn't configured.
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Image Processing Settings",
+					name: "Image Processing Settings",
+					fieldname: {
+						remove_bg_enabled: this.remove_bg_checked ? 1 : 0,
+						remove_bg_padding_pct: this.step1_padding_pct,
+					},
+				},
+			}).then(() => {
+				frappe.show_alert({ message: __("Remove BG defaults saved"), indicator: "green" });
+			}).catch(() => {
+				frappe.show_alert({ message: __("Failed to save default"), indicator: "red" });
+			});
+		},
+
+		_reset_wm_default() {
+			if (!this.watermark_settings) return;
+			this.local_watermark_settings = JSON.parse(JSON.stringify(this.watermark_settings));
+			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
+		},
+		_save_wm_default() {
+			const s = this.local_watermark_settings;
+			if (!s) return;
+			// Save both the Enable Watermark toggle (Watermark Settings.enabled)
+			// AND all Tiled/Corner params so next upload opens with the same
+			// state the user just configured.
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Watermark Settings",
+					name: "Watermark Settings",
+					fieldname: {
+						enabled: this.wm_enabled ? 1 : 0,
+						mode: s.mode || "Tiled",
+						position_x: s.position_x != null ? s.position_x : 80,
+						position_y: s.position_y != null ? s.position_y : 90,
+						corner_rotation: s.corner_rotation != null ? s.corner_rotation : 0,
+						size: s.size != null ? s.size : 20,
+						opacity: s.opacity != null ? s.opacity : 50,
+						tile_size: s.tile_size != null ? s.tile_size : 15,
+						tile_opacity: s.tile_opacity != null ? s.tile_opacity : 12,
+						tile_rotation: s.tile_rotation != null ? s.tile_rotation : -30,
+						tile_spacing: s.tile_spacing != null ? s.tile_spacing : 40,
+					},
+				},
+			}).then(() => {
+				// Refresh the shared cache so subsequent upload dialogs pick up
+				// the new defaults without a page reload.
+				if (frappe._watermark_settings_cache) {
+					Object.assign(frappe._watermark_settings_cache, s);
+					frappe._watermark_settings_cache.enabled = !!this.wm_enabled;
+				}
+				frappe.show_alert({ message: __("Watermark defaults saved"), indicator: "green" });
+			}).catch(() => {
+				frappe.show_alert({ message: __("Failed to save defaults"), indicator: "red" });
+			});
+		},
+
+		_reset_comment_default() {
+			if (!this.comment_defaults) return;
+			this.local_comment_defaults = JSON.parse(JSON.stringify(this.comment_defaults));
+			frappe.show_alert({ message: __("Reset to saved defaults"), indicator: "blue" });
+		},
+		_save_comment_default() {
+			const c = this.local_comment_defaults;
+			if (!c) return;
+			// Save enable state too so "Save as Default" is truly the full
+			// tab state. default_comments_enabled was added to Image
+			// Processing Settings specifically to carry this flag; see
+			// image_processing_settings.json.
+			frappe.call({
+				method: "frappe.client.set_value",
+				args: {
+					doctype: "Image Processing Settings",
+					name: "Image Processing Settings",
+					fieldname: {
+						default_comments_enabled: this.comments_enabled_default ? 1 : 0,
+						default_comment_font_family: c.font_family || "Arial",
+						default_comment_font_size_pct: c.font_size_pct || 5,
+						default_comment_font_weight: c.font_weight || "Normal",
+						default_comment_font_style: c.font_style || "Normal",
+						default_comment_color: c.color || "#000000",
+						default_comment_align: c.align || "Center",
+					},
+				},
+			}).then(() => {
+				frappe.show_alert({ message: __("Comment defaults saved"), indicator: "green" });
+			}).catch(() => {
+				frappe.show_alert({ message: __("Failed to save defaults"), indicator: "red" });
+			});
+		},
+
 		dragover() {
 			this.is_dragging = true;
 		},
@@ -485,11 +1096,17 @@ export default {
 			}
 
 			this.files = this.files.concat(files);
-			// if only one file is allowed and crop_image_aspect_ratio is set, open cropper immediately
+			// Single-file single-image flow: auto-open the cropper if we
+			// have any image-processing feature enabled (Remove BG / Watermark /
+			// Canvas / Comments) OR a fixed aspect restriction. Originally the
+			// gate was "aspect restriction set" — but once we removed the
+			// forced 1:1 on attach_doc_image, single-item uploads started
+			// skipping the cropper straight to Step 3. Re-use
+			// any_feature_shown so any opt-in feature triggers the cropper.
 			if (
 				this.files.length === 1 &&
 				!this.allow_multiple &&
-				this.restrictions.crop_image_aspect_ratio != null
+				(this.restrictions.crop_image_aspect_ratio != null || this.any_feature_shown)
 			) {
 				if (!this.files[0].file_obj.type.includes("svg")) {
 					this.toggle_image_cropper(0);
@@ -762,22 +1379,548 @@ export default {
 };
 </script>
 <style>
+/* ── 2-column grid for Step 1 + Step 3 ──────────────────────────────
+   The uploader auto-splits into a left column (dropzone / file list)
+   and a right column (feature-tabs / recap) when the caller opts into
+   any image-processing feature. Plain attachment uploads (no features)
+   still render single-column like the original Frappe dialog. The
+   cropper step switches off the grid via .fu-cropper-mode so it can
+   use its own internal layout.
+-------------------------------------------------------------------- */
+.file-uploader { display: block; }
+.file-uploader.fu-with-panel {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 420px;
+	gap: 20px;
+	align-items: stretch;
+}
+.file-uploader .fu-left-col { min-width: 0; }
+.file-uploader .fu-right-col {
+	position: sticky;
+	top: 0;
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	background: #fff;
+	padding: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	min-height: 360px;
+}
+
+/* ── Shared panel styles ──────────────────────────────────────────
+   Identical selectors + values to the cropper's scoped styles
+   (ImageCropper.vue). Because those are `scoped`, they only apply
+   inside the cropper; the uploader's Step 1 panel needs its own
+   copy so it renders identically without cross-component leaks.
+-------------------------------------------------------------------- */
+
+/* Tab header strip */
+.file-uploader .cropper-feature-tabs {
+	display: flex;
+	gap: 6px;
+	margin-bottom: 10px;
+}
+.file-uploader .cropper-feature-tab {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 10px 6px;
+	background: #fff;
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	cursor: pointer;
+	color: #303133;
+	transition: all 0.15s ease;
+}
+.file-uploader .cropper-feature-tab:hover {
+	border-color: var(--primary);
+}
+.file-uploader .cropper-feature-tab.active {
+	border: 2px solid var(--primary);
+	background: #ecf5ff;
+}
+.file-uploader .cropper-feature-tab-label {
+	font-weight: 600;
+	font-size: 15px;
+	color: #303133;
+	line-height: 1.2;
+}
+.file-uploader .cropper-feature-tab.active .cropper-feature-tab-label {
+	color: var(--primary);
+}
+.file-uploader .cropper-feature-tab-state {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 13px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+.file-uploader .cropper-feature-tab-state.on { color: #22c55e; }
+.file-uploader .cropper-feature-tab-state.off { color: #94a3b8; }
+.file-uploader .cropper-feature-tab-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+/* Tab body */
+.file-uploader .cropper-tab-body {
+	flex: 1;
+	padding: 14px;
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	background: #fff;
+	overflow-y: auto;
+	min-height: 0;
+}
+.file-uploader .cropper-tab-pane {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+/* "Enable X" row at top of each pane */
+.file-uploader .cropper-tab-enable {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 12px 14px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: #fafbfc;
+}
+.file-uploader .cropper-tab-enable-label {
+	font-size: 16px;
+	font-weight: 600;
+	color: #303133;
+}
+
+/* Toggle pill (same DOM as cropper) */
+.file-uploader .toggle-pill {
+	display: inline-flex;
+	align-items: center;
+	cursor: pointer;
+}
+.file-uploader .toggle-pill.is-disabled {
+	cursor: not-allowed;
+	opacity: 0.55;
+}
+.file-uploader .toggle-pill-switch {
+	display: inline-flex;
+}
+.file-uploader .toggle-pill-track {
+	display: inline-block;
+	width: 40px;
+	height: 22px;
+	border-radius: 11px;
+	background: #cbd5e1;
+	position: relative;
+	transition: background 0.2s ease;
+}
+.file-uploader .toggle-pill-track.on { background: var(--primary); }
+.file-uploader .toggle-pill-thumb {
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: #fff;
+	transition: transform 0.2s ease;
+}
+.file-uploader .toggle-pill-track.on .toggle-pill-thumb {
+	transform: translateX(18px);
+}
+
+/* Slider row (label | slider | value) */
+.file-uploader .wm-slider-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 6px;
+}
+.file-uploader .wm-slider-row:last-child { margin-bottom: 0; }
+.file-uploader .wm-slider-label {
+	width: 100px;
+	font-size: 15px;
+	font-weight: 500;
+	color: #475569;
+}
+.file-uploader .wm-slider {
+	flex: 1;
+	height: 4px;
+	cursor: pointer;
+	accent-color: var(--primary);
+}
+.file-uploader .wm-slider-value {
+	width: 52px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #303133;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Font family dropdown that lives in a wm-slider-row slot */
+.file-uploader .wm-select-inline {
+	flex: 1;
+	padding: 7px 10px;
+	font-size: 14px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: #fff;
+	color: #303133;
+	cursor: pointer;
+}
+.file-uploader .wm-select-inline:focus {
+	outline: none;
+	border-color: var(--primary);
+	box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+/* Segmented mode selector (Tiled/Corner, Aspect 1:1/4:3/…, Align L/C/R) */
+.file-uploader .segmented-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	background: var(--gray-100, #f3f4f6);
+	padding: 3px;
+	border-radius: 8px;
+	gap: 2px;
+}
+.file-uploader .segmented-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 18px;
+	border: none;
+	border-radius: 6px;
+	font-size: 14px;
+	font-weight: 500;
+	color: var(--text-color);
+	background: transparent;
+	cursor: pointer;
+	transition: all 0.18s ease;
+	white-space: nowrap;
+}
+.file-uploader .segmented-tab:hover {
+	background: var(--gray-200, #e5e7eb);
+}
+.file-uploader .segmented-tab.active {
+	background: var(--primary);
+	color: #fff;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* Aspect row has 6 options — shrink padding so all fit on one line at the
+   ~380px right-panel width instead of wrapping "Free" to a new row. */
+.file-uploader .segmented-tabs-aspect {
+	display: grid;
+	grid-template-columns: repeat(6, 1fr);
+}
+.file-uploader .segmented-tabs-aspect .segmented-tab {
+	padding: 8px 0;
+	justify-content: center;
+	font-size: 13px;
+}
+
+/* Row of inline check/color fields (B / I / Color ▣ / Solid BG ☑) */
+.file-uploader .wm-inline-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 14px;
+	align-items: center;
+	margin-top: 6px;
+}
+.file-uploader .wm-inline-check {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #475569;
+	cursor: pointer;
+	margin: 0;
+}
+.file-uploader .wm-inline-check input[type="checkbox"] {
+	width: 18px;
+	height: 18px;
+	margin: 0;
+	cursor: pointer;
+}
+.file-uploader .wm-inline-colour {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #475569;
+	margin: 0;
+}
+.file-uploader .wm-inline-colour input[type="color"] {
+	width: 36px;
+	height: 28px;
+	padding: 2px;
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	cursor: pointer;
+	background: transparent;
+}
+
+/* Adjustments sub-rows (padding, watermark content, comment content…) */
+.file-uploader .adjustments-row {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.file-uploader .adjustments-row-wm {
+	gap: 10px;
+}
+.file-uploader .adjustments-warn {
+	font-size: 13px;
+	color: var(--text-muted);
+	padding: 10px 12px;
+	background: #f8fafc;
+	border-radius: 6px;
+}
+.file-uploader .adjustments-field-label {
+	display: block;
+	margin: 0 0 6px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--text-color);
+}
+
+/* Panel action row (Reset / Save as Default) */
+.file-uploader .wm-panel-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 12px;
+}
+.file-uploader .wm-panel-actions .btn-xs {
+	font-size: 13px;
+	padding: 5px 14px;
+	line-height: 1.6;
+}
+
+/* ── Recap card (Step 3) ────────────────────────────────────────── */
+.fu-recap-card {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.fu-recap-title {
+	font-size: 16px;
+	font-weight: 600;
+	color: #0f172a;
+}
+.fu-recap-hint {
+	font-size: 13px;
+	color: var(--text-muted);
+	margin-bottom: 10px;
+	line-height: 1.5;
+}
+.fu-recap-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.fu-recap-list li {
+	display: grid;
+	grid-template-columns: 12px 1fr auto;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 14px;
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	background: #fafbfc;
+	font-size: 15px;
+}
+.fu-recap-list li.off {
+	background: #f8fafc;
+	color: #94a3b8;
+}
+.fu-recap-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+}
+.fu-recap-dot.on  { background: #10b981; }
+.fu-recap-dot.off { background: #cbd5e1; }
+.fu-recap-label { font-weight: 500; }
+.fu-recap-value {
+	font-size: 13px;
+	color: #64748b;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	font-weight: 500;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+.fu-recap-swatch {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	border-radius: 3px;
+	border: 1px solid #cbd5e1;
+	flex-shrink: 0;
+}
+
+/* ── Mobile: stack right column below left ─────────────────────── */
+@media (max-width: 900px) {
+	.file-uploader.fu-with-panel {
+		grid-template-columns: 1fr;
+		gap: 16px;
+	}
+	.file-uploader .fu-right-col {
+		position: static;
+		min-height: 0;
+		padding: 14px;
+	}
+	.file-uploader .cropper-feature-tab { padding: 8px 4px; }
+	.file-uploader .cropper-feature-tab-label { font-size: 14px; }
+	.file-uploader .cropper-feature-tab-state { font-size: 12px; }
+	.file-uploader .cropper-tab-enable-label { font-size: 15px; }
+	.file-uploader .fu-recap-list li { font-size: 14px; padding: 10px 12px; }
+	.file-uploader .wm-slider-label { width: 82px; font-size: 13px; }
+	.file-uploader .wm-slider-value { width: 44px; font-size: 12px; }
+	.file-uploader .segmented-tab { padding: 7px 12px; font-size: 13px; }
+}
+
 .file-upload-area {
-	min-height: 16rem;
+	min-height: 20rem;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	border: 1px dashed var(--dark-border-color);
-	border-radius: var(--border-radius);
+	padding: 24px;
+	border: 2px dashed var(--dark-border-color);
+	border-radius: 10px;
 	cursor: pointer;
 	background-color: var(--bg-color);
+	transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.file-upload-area:hover {
+	border-color: var(--primary);
+	background-color: var(--control-bg, #f4f8fc);
+}
+.file-upload-area .text-center {
+	color: var(--text-muted);
+	font-size: 14px;
 }
 
+/* File picker button tiles — rounded pill-style hover, responsive grid */
+.file-upload-area .mt-2.text-center {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 12px;
+	margin-top: 18px !important;
+}
 .btn-file-upload {
 	background-color: transparent;
-	border: none;
+	border: 1px solid transparent;
+	border-radius: 12px;
 	box-shadow: none;
+	padding: 14px 18px;
 	font-size: var(--text-xs);
+	min-width: 96px;
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.btn-file-upload:hover {
+	transform: translateY(-1px);
+	background: #fff;
+	border-color: var(--border-color);
+	box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+}
+.btn-file-upload:active {
+	transform: translateY(0);
+}
+.btn-file-upload svg {
+	display: block;
+}
+.btn-file-upload .mt-1 {
+	font-size: 12px;
+	font-weight: 500;
+	color: var(--text-color);
+	margin-top: 2px !important;
+}
+
+/* Post-crop file preview list — rounded rows, breathable spacing,
+   responsive for narrow viewports. Overrides base FilePreview.vue
+   styles so the list lines up with the modal's new sizing. */
+.file-uploader .file-preview-container {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 14px;
+}
+.file-uploader .file-preview-container .file-preview {
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	background: #fff;
+	padding: 12px 14px;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.file-uploader .file-preview-container .file-preview + .file-preview {
+	border-top-color: var(--border-color);
+}
+.file-uploader .file-preview-container .file-preview:hover {
+	background-color: var(--bg-color);
+	border-color: var(--dark-border-color);
+	box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+}
+.file-uploader .file-preview .file-icon {
+	width: 3rem;
+	height: 3rem;
+	border-radius: 8px;
+}
+.file-uploader .file-preview .file-name {
+	font-size: 13px;
+	font-weight: 600;
+}
+.file-uploader .file-preview .file-size {
+	font-size: 12px;
+}
+.file-uploader .file-preview .config-area {
+	margin-top: 4px;
+}
+
+/* Below-list action row (Upload button + help text) — align vertically
+   on mobile so the button never ends up squeezed under a long hint. */
+.file-uploader .flex.align-center {
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+	.file-upload-area {
+		min-height: 14rem;
+		padding: 16px;
+	}
+	.file-upload-area .mt-2.text-center {
+		gap: 8px;
+	}
+	.btn-file-upload {
+		min-width: 80px;
+		padding: 10px 12px;
+	}
+	.file-uploader .file-preview-container .file-preview {
+		padding: 10px;
+	}
 }
 
 .footer-toggle {
@@ -977,5 +2120,84 @@ export default {
 	font-size: 13px;
 	font-weight: 500;
 	border-radius: 8px;
+}
+
+/* The File Uploader dialog now hosts ImageCropper + its side panel; the default
+   modal-dialog (typically 600px wide) is too small. Expand up to 90vw / 90vh
+   with a hard ceiling of 1600 × 900 so it doesn't dominate 4K displays. */
+.file-uploader-dialog .modal-dialog {
+	max-width: min(90vw, 1600px);
+	width: min(90vw, 1600px);
+	margin: 1.75rem auto;
+}
+.file-uploader-dialog .modal-content {
+	max-height: min(90vh, 900px);
+	min-height: min(90vh, 900px);
+	display: flex;
+	flex-direction: column;
+}
+.file-uploader-dialog .modal-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+}
+/* When the ImageCropper mounts, its .cropper-grid should fill the body so
+   the left column can distribute height (toolbar / image / preview).
+   Scoped to .fu-cropper-mode so it doesn't override the Step 1/3 grid
+   layout (.fu-with-panel uses display: grid, and a blanket flex-column
+   rule on .file-uploader would beat that specificity). */
+.file-uploader-dialog .modal-body > .file-uploader.fu-cropper-mode {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+.file-uploader-dialog .modal-body > .file-uploader.fu-cropper-mode > .cropper-grid {
+	flex: 1 1 auto;
+	min-height: 0;
+}
+/* Footer region — standard-actions holds the primary Upload button,
+   custom-actions holds the feature toggles (Watermark / Remove BG
+   pills). Space them properly so they don't collide, and wrap on
+   narrow viewports. */
+.file-uploader-dialog .modal-footer {
+	gap: 10px;
+	flex-wrap: wrap;
+}
+.file-uploader-dialog .modal-footer .custom-btns {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+@media (max-width: 768px) {
+	.file-uploader-dialog .modal-dialog {
+		max-width: 100vw;
+		width: 100vw;
+		margin: 0;
+	}
+	.file-uploader-dialog .modal-content {
+		min-height: 100vh;
+		max-height: 100vh;
+		border-radius: 0;
+	}
+	.file-uploader-dialog .modal-footer {
+		flex-direction: column;
+		align-items: stretch;
+	}
+	.file-uploader-dialog .modal-footer .custom-btns {
+		justify-content: center;
+		order: -1; /* Toggles above primary action on mobile */
+	}
+	.file-uploader-dialog .modal-footer .standard-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 6px;
+	}
+	.footer-toggle {
+		margin-right: 0;
+	}
 }
 </style>

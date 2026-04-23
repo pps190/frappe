@@ -24,8 +24,14 @@ export default class FileUploader {
 		remove_bg_disabled_hint,
 		remove_bg_disabled_link,
 		remove_bg_padding_pct,
+		default_crop_aspect,
+		default_solid_background,
+		default_background_color,
 		show_watermark,
 		watermark_settings,
+		show_comments,
+		comment_defaults,
+		comment_presets,
 	} = {}) {
 		frm && frm.attachments.max_reached(true);
 		this.show_remove_bg = show_remove_bg;
@@ -34,6 +40,9 @@ export default class FileUploader {
 		this.remove_bg_padding_pct = remove_bg_padding_pct;
 		this.show_watermark = show_watermark;
 		this.watermark_settings = watermark_settings;
+		this.show_comments = show_comments;
+		this.comment_defaults = comment_defaults;
+		this.comment_presets = comment_presets;
 
 		if (!wrapper) {
 			this.make_dialog(dialog_title);
@@ -64,8 +73,14 @@ export default class FileUploader {
 						remove_bg_default,
 						remove_bg_disabled_hint,
 						remove_bg_padding_pct,
+						default_crop_aspect,
+						default_solid_background,
+						default_background_color,
 						show_watermark,
 						watermark_settings,
+						show_comments,
+						comment_defaults,
+						comment_presets,
 					},
 				}),
 		});
@@ -125,28 +140,11 @@ export default class FileUploader {
 			this.uploader.add_files(files);
 		}
 
-		// Add footer toggles after uploader is ready
-		if (this.dialog && this.show_remove_bg) {
-			this.add_footer_toggle(
-				"remove_bg",
-				__("Remove Background"),
-				"remove_bg_checked",
-				!this.remove_bg_disabled_hint,
-				this.remove_bg_disabled_hint || null,
-				this.remove_bg_disabled_link || null,
-			);
-		}
-		if (this.dialog && this.show_watermark) {
-			const has_config = this.watermark_settings && this.watermark_settings.watermark_image;
-			this.add_footer_toggle(
-				"watermark",
-				__("Watermark"),
-				"wm_enabled",
-				has_config && this.watermark_settings.enabled ? true : false,
-				has_config ? null : __("Click to configure watermark"),
-				has_config ? null : "/app/watermark-settings",
-			);
-		}
+		// Note: the footer-toggle pills (Remove BG / Watermark / Comments /
+		// Canvas) have been removed. They are now rendered as tabs + toggle
+		// switches inside the uploader body's right-side panel, which keeps
+		// one source of truth for feature state across all 3 steps (file
+		// picker, cropper, post-crop list).
 	}
 
 	upload_files() {
@@ -189,6 +187,8 @@ export default class FileUploader {
 		});
 
 		this.wrapper = this.dialog.body;
+		// Tag the dialog so CSS can size it larger for the image features.
+		this.dialog.$wrapper.addClass("file-uploader-dialog");
 		this.dialog.show();
 		this.dialog.$wrapper.on("hidden.bs.modal", function () {
 			$(this).data("bs.modal", null);
