@@ -3067,10 +3067,23 @@ img {
 		grid-template-columns: 1fr;
 		grid-template-rows: auto auto auto;
 		height: auto;
+		min-height: auto;
 	}
-	.cropper-left-col { min-height: 0; }
+	.cropper-left-col {
+		min-height: auto;
+	}
+	/* Stacked layout: cropper stage needs a guaranteed minimum height
+	   so it stays usable on phones. 55vh is enough to fit a product
+	   photo with room to drag the crop box; we also enforce an
+	   absolute 400px floor so short viewports (≤720px tall) still get
+	   a workable canvas, and cap at 600px so mid-sized tablets don't
+	   get a cropper that dwarfs the controls below it. */
+	.cropper-image-stage {
+		min-height: max(400px, 55vh);
+		max-height: 600px;
+	}
 	.cropper-image-wrapper {
-		min-height: 50vh;
+		min-height: inherit;
 	}
 	.cropper-right-col {
 		max-height: none;
@@ -3087,9 +3100,13 @@ img {
 	.segmented-tab { padding: 7px 12px; font-size: 13px; }
 }
 @media (max-width: 480px) {
-	/* Very small phones — cropper still takes most of the viewport,
-	   preview thumb shrinks slightly to free toolbar width. */
-	.cropper-image-wrapper { min-height: 40vh; }
+	/* Very small phones — keep the same 400px floor as @900px so
+	   users aren't cropping in a tiny viewport. Cap tighter since
+	   phones have less vertical space overall. */
+	.cropper-image-stage {
+		min-height: max(400px, 50vh);
+		max-height: 520px;
+	}
 	.cropper-preview-canvas,
 	.cropper-preview-elimage,
 	.cropper-toolbar-preview-spinner {
@@ -4006,6 +4023,17 @@ img {
 	/* Remove the default modal-body bottom padding so the sticky action
 	   bar sits flush at the bottom edge with no visible gap. */
 	padding-bottom: 0 !important;
+}
+
+/* Narrow viewports: the cropper stage + param panel stack vertically,
+   and their combined height easily exceeds the available modal height.
+   Drop the modal-body's hard cap so the ENTIRE body scrolls together
+   (toolbar + stage + params + sticky bottom bar), instead of trying to
+   fit everything and squeezing the stage into a 60px sliver. */
+@media (max-width: 900px) {
+	.modal-body.image-cropper-modal-body {
+		max-height: none;
+	}
 }
 
 /* Hide the dialog's built-in footer (Set all private / Upload) while the
