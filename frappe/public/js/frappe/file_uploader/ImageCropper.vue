@@ -997,8 +997,13 @@ export default {
 			// consumers (any app that embeds <image-cropper> in its own
 			// page/dialog without the .file-uploader wrapper) keep their
 			// default modal-body + modal-footer layout untouched.
-			const body = this.$el.closest && this.$el.closest(".file-uploader .modal-body");
-			if (body) {
+			//
+			// DOM layout is .modal-body > .file-uploader > ...cropper
+			// — walk up to the modal-body, then confirm our .file-uploader
+			// container is a descendant of it (guards against running
+			// inside an unrelated dialog that happens to have .modal-body).
+			const body = this.$el.closest && this.$el.closest(".modal-body");
+			if (body && body.querySelector(".file-uploader")) {
 				body.classList.add("image-cropper-modal-body");
 				this._modal_body_el = body;
 			}
@@ -3077,9 +3082,12 @@ img {
 	   photo with room to drag the crop box; we also enforce an
 	   absolute 400px floor so short viewports (≤720px tall) still get
 	   a workable canvas, and cap at 600px so mid-sized tablets don't
-	   get a cropper that dwarfs the controls below it. */
+	   get a cropper that dwarfs the controls below it.
+	   !important because the desktop rule (.cropper-image-stage {
+	   min-height: 0 }) sits lower in source order and would otherwise
+	   win the cascade on equal specificity. */
 	.cropper-image-stage {
-		min-height: max(400px, 55vh);
+		min-height: max(400px, 55vh) !important;
 		max-height: 600px;
 	}
 	.cropper-image-wrapper {
@@ -3104,7 +3112,7 @@ img {
 	   users aren't cropping in a tiny viewport. Cap tighter since
 	   phones have less vertical space overall. */
 	.cropper-image-stage {
-		min-height: max(400px, 50vh);
+		min-height: max(400px, 50vh) !important;
 		max-height: 520px;
 	}
 	.cropper-preview-canvas,
