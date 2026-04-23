@@ -66,16 +66,27 @@
 
 				<!-- One Save-as-Default button persists the whole crop
 				     toolbar state (aspect + solid background + colour)
-				     onto Image Processing Settings. Hidden in fixed-ratio
+				     onto Image Processing Settings. Reset reverts the
+				     three values to whatever the uploader was opened
+				     with (prop values), mirroring Remove BG padding's
+				     Reset / Save-as-Default pair. Hidden in fixed-ratio
 				     batch flows since those rows don't edit defaults. -->
-				<button
-					v-if="fixed_aspect_ratio == null"
-					class="btn btn-xs btn-primary-light cropper-toolbar-save"
-					:title="__('Remember crop ratio, solid background, and colour as defaults for future uploads')"
-					@click="save_crop_defaults"
-				>
-					{{ __("Save as Default") }}
-				</button>
+				<template v-if="fixed_aspect_ratio == null">
+					<button
+						class="btn btn-xs btn-default cropper-toolbar-reset"
+						:title="__('Revert crop ratio, solid background, and colour to saved defaults')"
+						@click="reset_crop_defaults"
+					>
+						{{ __("Reset") }}
+					</button>
+					<button
+						class="btn btn-xs btn-primary-light cropper-toolbar-save"
+						:title="__('Remember crop ratio, solid background, and colour as defaults for future uploads')"
+						@click="save_crop_defaults"
+					>
+						{{ __("Save as Default") }}
+					</button>
+				</template>
 
 				<!-- Preview block inline in the toolbar, right-aligned via
 				     margin-left: auto so the full toolbar height stays
@@ -1300,6 +1311,24 @@ export default {
 			if (Math.abs(n - 4 / 3) < 1e-4) return "4:3";
 			if (Math.abs(n - 16 / 9) < 1e-4) return "16:9";
 			return "Free";
+		},
+
+		reset_crop_defaults() {
+			// Revert the three crop-toolbar values (aspect + solid bg
+			// + colour) to whatever the uploader was constructed with.
+			// Matches reset_padding_pct's "prop is source of truth"
+			// behaviour. No server round trip — just restore local state.
+			if (this.default_crop_aspect) {
+				this.aspect_ratio = this._aspect_string_to_number(this.default_crop_aspect);
+			} else {
+				this.aspect_ratio = NaN;
+			}
+			this.solid_background = !!this.default_solid_background;
+			this.background_color = this.default_background_color || "#FFFFFF";
+			frappe.show_alert({
+				message: __("Reset to saved defaults"),
+				indicator: "blue",
+			});
 		},
 
 		async save_crop_defaults() {
