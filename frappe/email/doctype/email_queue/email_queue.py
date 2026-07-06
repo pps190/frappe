@@ -23,16 +23,60 @@ from frappe.query_builder import DocType, Interval
 from frappe.query_builder.functions import Now
 from frappe.utils import (
 	add_days,
+	add_to_date,
 	cint,
 	cstr,
 	get_hook_method,
 	get_string_between,
 	get_url,
 	now,
+	now_datetime,
 	nowdate,
 	sbool,
 	split_emails,
 )
+
+
+# --- Custom (not upstream Frappe): ZeptoMail relay-throttle handling ---------------
+# ZeptoMail throttles the SMTP relay two ways, on two exception shapes:
+#   daily cap  -> SMTPDataError '5.1.8 Sender Org Blocked'  (reply in .smtp_error, bytes)
+#   rate limit -> SMTPRecipientsRefused '452 4.4.5 Rate limit exceeded' (reply in .recipients)
+# Both mean "stop sending", NOT a per-message defect, so they must not burn retries.
+ZEPTOMAIL_DAILY_CAP_SIGNALS = (b"sender org blocked", b"5.1.8")   # ZeptoMail daily cap (= SM_133)
+ZEPTOMAIL_RATE_LIMIT_SIGNALS = (b"rate limit exceeded", b"4.4.5")  # ZeptoMail too-fast throttle
+
+# How long to pause dequeuing after each throttle, in SECONDS. When a throttle is caught we
+# set the `zeptomail_send_paused` cache flag with this TTL; while it is live,
+# get_queue() returns [] and can_send_now() is False (no sends attempted). On expiry the queue
+# sends one probe: still throttled -> flag re-trips; recovered -> sending resumes. The values
+# differ because the two throttles clear on different timescales:
+#   daily_cap  3600s (1h)  -- the daily quota only frees as sends roll off the rolling 24h
+#                             window, so there is no point probing more often than hourly.
+#   rate_limit 300s (5min) -- "try again later" is a short-window rate throttle that clears
+#                             quickly, so a brief pause then resume.
+# These are re-probe cadences, not exact waits (ZeptoMail publishes no throttle timings); the
+# self-healing probe corrects any overshoot. Tune after observing production.
+ZEPTOMAIL_THROTTLE_COOLDOWN = {"daily_cap": 3600, "rate_limit": 300}  # seconds
+
+
+def classify_relay_throttle(exc):
+	"""Classify an SMTP exception as a ZeptoMail relay throttle: return 'daily_cap',
+	'rate_limit', or None. None => let normal handling run (e.g. a 550 bad-address bounce
+	keeps frappe's retry/Error path). Reads the reply from either exception shape:
+	SMTPDataError (.smtp_error, bytes) or SMTPRecipientsRefused (.recipients dict)."""
+	if not isinstance(exc, smtplib.SMTPException):
+		return None
+	parts = []
+	if err := getattr(exc, "smtp_error", None):  # SMTPDataError / SMTPResponseException
+		parts.append(err if isinstance(err, bytes) else str(err).encode(errors="ignore"))
+	for _code, msg in (getattr(exc, "recipients", {}) or {}).values():  # SMTPRecipientsRefused
+		parts.append(msg if isinstance(msg, bytes) else str(msg).encode(errors="ignore"))
+	text = b" ".join(parts).lower()
+	if any(s in text for s in ZEPTOMAIL_DAILY_CAP_SIGNALS):
+		return "daily_cap"
+	if any(s in text for s in ZEPTOMAIL_RATE_LIMIT_SIGNALS):
+		return "rate_limit"
+	return None
 
 
 class EmailQueue(Document):
@@ -118,6 +162,9 @@ class EmailQueue(Document):
 			frappe.are_emails_muted()
 			or not self.is_to_be_sent()
 			or cint(frappe.db.get_default("suspend_email_queue")) == 1
+			# Custom (not upstream Frappe): a tripped ZeptoMail throttle breaker pauses sends,
+			# so sibling jobs already enqueued this tick skip the SMTP attempt.
+			or frappe.cache().get_value("zeptomail_send_paused")
 		):
 			return False
 
@@ -230,7 +277,21 @@ class SendMailContext:
 		if not self.retain_smtp_session:
 			self.smtp_server.quit()
 
-		if exc_type in exceptions:
+		# Custom (not upstream Frappe): ZeptoMail relay throttle (daily cap or rate limit).
+		# Trip a circuit-breaker so the queue stops dequeuing until the cooldown elapses,
+		# storing WHAT tripped it + when it clears so the list-view banner can show the pause.
+		# 550 bad-address etc. do NOT match classify_relay_throttle -> throttle stays None.
+		throttle = classify_relay_throttle(exc_val) if exc_type else None
+		if throttle:
+			cooldown = ZEPTOMAIL_THROTTLE_COOLDOWN[throttle]
+			frappe.cache().set_value(
+				"zeptomail_send_paused",
+				{"kind": throttle, "until": add_to_date(now_datetime(), seconds=cooldown)},
+				expires_in_sec=cooldown,
+			)
+
+		# A throttle is kept queued WITHOUT burning a retry, same as the handled exceptions.
+		if exc_type in exceptions or throttle:
 			update_fields = {
 				"status": "Partially Sent" if self.sent_to_atleast_one_recipient else "Not Sent",
 				"error": trace,
@@ -383,6 +444,36 @@ def send_now(name):
 def toggle_sending(enable):
 	frappe.only_for("System Manager")
 	frappe.db.set_default("suspend_email_queue", 0 if sbool(enable) else 1)
+
+
+@frappe.whitelist()
+def get_daily_limit_status():
+	"""Custom (not upstream Frappe): status for the Email Queue list-view banner showing
+	ZeptoMail daily-send-limit usage and any active relay-throttle pause. Returns
+	{"limit": 0} when the feature is off (no `zeptomail_daily_limit` site config)."""
+	limit = cint(frappe.conf.get("zeptomail_daily_limit"))
+	if not limit:
+		return {"limit": 0}
+
+	# One scan for both the quota count and the reset time (rolling window: the next slot
+	# frees when the oldest counted send exits the 24h window). Mirrors get_daily_sent_count.
+	sent, oldest = frappe.db.sql(
+		"""SELECT COUNT(`name`), MIN(`modified`) FROM `tabEmail Queue`
+		   WHERE `status` IN ('Sent', 'Sending')
+		   AND `modified` > (NOW() - INTERVAL '24' HOUR)""",
+	)[0]
+	# live circuit-breaker state (dict set by SendMailContext.__exit__ on a throttle), so an
+	# admin viewing the queue sees WHY sending is paused and until when.
+	breaker = frappe.cache().get_value("zeptomail_send_paused") or {}
+	return {
+		"limit": limit,
+		"sent": sent,
+		"remaining": max(0, limit - sent),
+		"resets_at": add_to_date(oldest, hours=24) if oldest else None,
+		"throttled": bool(breaker),
+		"throttle_kind": breaker.get("kind"),  # "daily_cap" | "rate_limit" | None
+		"throttle_until": breaker.get("until"),  # when the pause lifts, or None
+	}
 
 
 def on_doctype_update():

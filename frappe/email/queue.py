@@ -172,8 +172,37 @@ def flush(from_test=False):
 			frappe.get_doc("Email Queue", row.name).log_error()
 
 
+def get_daily_sent_count():
+	"""Count Email Queue rows that consumed today's quota: Sent or Sending in the last
+	24h. Uses `modified` (bumped by update_status on each attempt), not `creation`, so a
+	row queued earlier but retried into Sent today counts against today's quota.
+	Blocked messages never reach 'Sent', so are correctly not counted.
+
+	Custom (not upstream Frappe): supports the ZeptoMail daily-send-limit gate below.
+	"""
+	return frappe.db.sql(
+		"""SELECT COUNT(`name`) FROM `tabEmail Queue`
+		   WHERE `status` IN ('Sent', 'Sending')
+		   AND `modified` > (NOW() - INTERVAL '24' HOUR)""",
+	)[0][0]
+
+
 def get_queue():
 	batch_size = cint(frappe.conf.email_queue_batch_size) or 500
+
+	# Custom (not upstream Frappe): ZeptoMail relay daily-send-limit gate.
+	# Circuit-breaker: a recent throttle reply (see SendMailContext.__exit__ in
+	# email_queue.py) halts dequeuing until its cooldown elapses. Checked independently of
+	# the daily-limit config so the reactive pause also works when no daily cap is set.
+	if frappe.cache().get_value("zeptomail_send_paused"):
+		return []
+
+	daily_limit = cint(frappe.conf.get("zeptomail_daily_limit"))
+	if daily_limit:
+		remaining = daily_limit - get_daily_sent_count()
+		if remaining <= 0:
+			return []
+		batch_size = min(batch_size, remaining)
 
 	return frappe.db.sql(
 		f"""select
