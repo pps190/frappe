@@ -738,7 +738,12 @@ frappe.ui.form.Form = class FrappeForm {
 			me.validate_and_save(save_action, callback, btn, on_error, resolve, reject);
 		})
 			.then(() => {
-				me.show_success_action();
+				// A post-submit "Update" is an edit, not a submission — the
+				// SuccessAction toast ("... has been submitted successfully")
+				// would be wrong even on success.
+				if (save_action !== "Update") {
+					me.show_success_action();
+				}
 			})
 			.catch((e) => {
 				console.error(e); // eslint-disable-line
@@ -772,10 +777,17 @@ frappe.ui.form.Form = class FrappeForm {
 				}
 				me.refresh();
 			} else {
+				// Server rejected the save — settle the promise as FAILED so
+				// callers' success paths (e.g. the SuccessAction toast) never
+				// run. Previously this fell through to resolve(), so a failed
+				// post-submit Update still popped "... has been submitted
+				// successfully" next to the error dialog.
 				if (on_error) {
 					on_error();
-					reject();
 				}
+				callback && callback(r);
+				reject();
+				return;
 			}
 			callback && callback(r);
 			resolve();
