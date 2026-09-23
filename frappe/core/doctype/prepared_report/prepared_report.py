@@ -76,7 +76,24 @@ def generate_report(prepared_report):
 				if data:
 					report.custom_columns = data["columns"]
 
-		result = generate_report_result(report=report, filters=instance.filters, user=instance.owner)
+		# Prepared Report has no way to learn a report's tree/parent_field
+		# config -- that's purely client-side (report .js report_settings),
+		# never sent to the server at enqueue time. Gross Profit's grouped-
+		# by-invoice view relies on it to avoid double-counting child rows
+		# into add_total_row's total (pps190/next#753); hardcode it here
+		# rather than threading is_tree/parent_field through the whole
+		# background pipeline for the one report that needs it today.
+		is_tree, parent_field = False, None
+		if report.report_name == "Gross Profit":
+			is_tree, parent_field = True, "parent_invoice"
+
+		result = generate_report_result(
+			report=report,
+			filters=instance.filters,
+			user=instance.owner,
+			is_tree=is_tree,
+			parent_field=parent_field,
+		)
 		create_json_gz_file(result, instance.doctype, instance.name)
 
 		instance.status = "Completed"
