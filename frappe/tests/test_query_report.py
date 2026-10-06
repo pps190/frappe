@@ -1,10 +1,17 @@
 # Copyright (c) 2019, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
 
+from unittest.mock import patch
+
 import frappe
 import frappe.utils
 from frappe.core.doctype.doctype.test_doctype import new_doctype
-from frappe.desk.query_report import build_xlsx_data, export_query, run
+from frappe.desk.query_report import (
+	build_xlsx_data,
+	export_query,
+	run,
+	setup_automotive_part_report_response,
+)
 from frappe.tests.ui_test_helpers import create_doctype
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils.xlsxutils import make_xlsx
@@ -188,3 +195,57 @@ data = columns, result
 		except Exception as e:
 			raise e
 			frappe.db.rollback()
+
+	def test_automotive_part_response_skips_non_item_rows(self):
+		"""Group-by subtotals and blank rows in an Item column must not break the report."""
+		columns = [
+			{"label": "Item Code", "fieldname": "item_code", "fieldtype": "Link", "options": "Item"},
+			{"label": "Item Name", "fieldname": "item_name", "fieldtype": "Data"},
+			{"label": "Amount", "fieldname": "amount", "fieldtype": "Currency"},
+		]
+		data = [
+			{"item_code": "ITM-0001", "item_name": "Brake Pad", "amount": 10},
+			{"item_code": "Retail", "amount": 10},  # group-by subtotal row
+			{"item_code": None, "amount": 5},  # non-stock line
+			{},  # spacer row
+			["not", "a", "dict"],
+		]
+		items = [frappe._dict(name="ITM-0001", brand="Bosch", item_code="BP-123")]
+
+		with patch("frappe.get_all", return_value=items) as get_all:
+			columns, data = setup_automotive_part_report_response(columns, data)
+
+		get_all.assert_called_once()
+		self.assertCountEqual(["ITM-0001", "Retail"], get_all.call_args.kwargs["filters"]["name"][1])
+		self.assertListEqual(
+			["__item__", "brand", "item_code", "amount"], [c["fieldname"] for c in columns]
+		)
+		self.assertEqual(columns[0]["hidden"], 1)
+		self.assertEqual(columns[2]["fieldtype"], "Data")
+		self.assertNotIn("options", columns[2])
+		self.assertDictEqual(
+			{
+				"__item__": "ITM-0001",
+				"item_code": "BP-123",
+				"brand": "Bosch",
+				"item_name": "Brake Pad",
+				"amount": 10,
+			},
+			data[0],
+		)
+		self.assertDictEqual({"item_code": "Retail", "amount": 10}, data[1])
+		self.assertDictEqual({"item_code": None, "amount": 5}, data[2])
+		self.assertDictEqual({}, data[3])
+
+	def test_automotive_part_response_ignores_reports_without_item_links(self):
+		columns = [
+			{"label": "Customer", "fieldname": "customer", "fieldtype": "Link", "options": "Customer"}
+		]
+		data = [{"customer": "C-1"}]
+
+		with patch("frappe.get_all") as get_all:
+			result = setup_automotive_part_report_response(columns, data)
+
+		get_all.assert_not_called()
+		self.assertEqual(result, (columns, data))
+		self.assertEqual(columns[0]["options"], "Customer")

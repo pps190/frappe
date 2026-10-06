@@ -16,6 +16,7 @@ from frappe.monitor import add_data_to_monitor
 from frappe.permissions import get_role_permissions
 from frappe.utils import (
 	cint,
+	create_batch,
 	cstr,
 	flt,
 	format_duration,
@@ -244,7 +245,68 @@ def run(
 	if sbool(are_default_filters) and report.custom_filters:
 		result["custom_filters"] = report.custom_filters
 
+	if "columns" in result and "result" in result:
+		result["columns"], result["result"] = setup_automotive_part_report_response(
+			result["columns"], result["result"]
+		)
+
 	return result
+
+
+def setup_automotive_part_report_response(columns, data):
+	"""Show Item links as the item's part number with a Brand column beside it.
+
+	Item names are opaque, so each Link/Item column becomes a Data column holding
+	`Item.item_code`, and the original name moves to a hidden `__item__` link.
+	Rows whose value is not an Item (group-by subtotals, spacer rows, non-stock
+	lines) are left as they are.
+	"""
+	if ("Link", "Item") not in [(c.get("fieldtype", ""), c.get("options", "")) for c in columns]:
+		return columns, data
+
+	item_code_fieldnames = []
+	columns_to_remove = []
+	columns_to_insert = []
+
+	for i, column in enumerate(columns):
+		if column["fieldname"] in ("brand", "item_name", "entity_name"):
+			columns_to_remove.append(column)
+		elif column.get("fieldtype") == "Link" and column.get("options") == "Item":
+			del column["options"]
+			column["fieldtype"] = "Data"
+			item_code_fieldnames.append(column["fieldname"])
+			columns_to_insert.append((i, {"fieldname": "brand", "fieldtype": "Data", "label": "Brand"}))
+
+	if columns_to_insert:
+		columns_to_insert.append(
+			(0, {"fieldname": "__item__", "fieldtype": "Link", "options": "Item", "hidden": 1})
+		)
+
+	for i, column in columns_to_insert:
+		columns.insert(i, column)
+
+	for column in columns_to_remove:
+		columns.remove(column)
+
+	rows = [d for d in data if isinstance(d, dict)]
+	names = {d.get(fieldname) for d in rows for fieldname in item_code_fieldnames} - {None, ""}
+	items = {}
+	for batch in create_batch(list(names), 1000):
+		for item in frappe.get_all(
+			"Item", filters={"name": ("in", batch)}, fields=["name", "brand", "item_code"]
+		):
+			items[item.name] = item
+
+	for d in rows:
+		for fieldname in item_code_fieldnames:
+			item = items.get(d.get(fieldname))
+			if not item:
+				continue
+			d["__item__"] = d[fieldname]
+			d["brand"] = item.brand
+			d[fieldname] = item.item_code
+
+	return columns, data
 
 
 def add_custom_column_data(custom_columns, result):
