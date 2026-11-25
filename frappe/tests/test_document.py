@@ -160,6 +160,24 @@ class TestDocument(FrappeTestCase):
 
 		self.assertEqual(frappe.db.get_value("User", d.name), d.name)
 
+	def test_link_validation_with_fetch_from_dependents(self):
+		# ToDo.assigned_by (Link User) has assigned_by_full_name fetched from it
+		missing_user = "missing_fetch_from_link@example.com"
+		frappe.delete_doc_if_exists("User", missing_user, 1)
+		meta = frappe.get_meta("ToDo")
+		self.assertEqual(meta.get_field("assigned_by_full_name").fetch_from, "assigned_by.full_name")
+
+		todo = frappe.get_doc(
+			{"doctype": "ToDo", "description": "fetch_from link validation", "assigned_by": missing_user}
+		)
+		self.assertRaises(frappe.LinkValidationError, todo.insert)
+
+		todo.assigned_by = "Administrator"
+		todo.insert()
+		self.assertEqual(
+			todo.assigned_by_full_name, frappe.db.get_value("User", "Administrator", "full_name")
+		)
+
 	def test_validate(self):
 		d = self.test_insert()
 		d.starts_on = "2014-01-01"
